@@ -29,6 +29,7 @@ interface FileTreeState {
   selectedPath: string | null;
   loadingPaths: string[];
   dirErrors: Record<string, string>;
+  dragOverPath: string | null;
 
   setRoot: (serverId: string, rootPath: string, serverName?: string) => Promise<void>;
   switchServer: (serverId: string | null) => Promise<void>;
@@ -39,6 +40,9 @@ interface FileTreeState {
   toggleExpand: (dirPath: string) => Promise<void>;
   collapseAll: () => void;
   setSelectedPath: (path: string | null) => void;
+  setDragOverPath: (path: string | null) => void;
+  checkFileExists: (serverId: string, remotePath: string) => Promise<boolean>;
+  moveItem: (oldPath: string, targetDir: string, newName?: string, overwrite?: boolean) => Promise<void>;
   createFile: (parentPath: string, name: string) => Promise<void>;
   createDir: (parentPath: string, name: string) => Promise<void>;
   renameItem: (oldPath: string, newName: string) => Promise<void>;
@@ -56,6 +60,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   selectedPath: null,
   loadingPaths: [],
   dirErrors: {},
+  dragOverPath: null,
 
   loadRecentProjects: async () => {
     try {
@@ -228,6 +233,63 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
 
   setSelectedPath: (path: string | null) => {
     set({ selectedPath: path });
+  },
+
+  setDragOverPath: (path: string | null) => {
+    set({ dragOverPath: path });
+  },
+
+  checkFileExists: async (serverId: string, remotePath: string): Promise<boolean> => {
+    try {
+      await invoke("sftp_stat", { serverId, path: remotePath });
+      return true;
+    } catch {
+      const parts = remotePath.split("/");
+      const filename = parts.pop();
+      const parent = parts.join("/") || "/";
+      const entries = get().tree[parent];
+      if (entries && filename) {
+        return entries.some((e) => e.name === filename);
+      }
+      return false;
+    }
+  },
+
+  moveItem: async (oldPath: string, targetDir: string, newName?: string, overwrite?: boolean) => {
+    const { currentServerId, rootPath } = get();
+    if (!currentServerId) return;
+
+    const parts = oldPath.split("/");
+    const oldName = parts.pop() || "";
+    const sourceParent = parts.join("/") || rootPath || "/";
+    const cleanTargetDir = targetDir.replace(/\/+$/, "");
+    const finalName = newName || oldName;
+    const destPath = `${cleanTargetDir}/${finalName}`;
+
+    if (oldPath === destPath) return;
+
+    if (overwrite) {
+      try {
+        await invoke("sftp_remove", {
+          serverId: currentServerId,
+          path: destPath,
+          isDir: false,
+        });
+      } catch (e) {
+        console.warn("Failed to remove existing file before overwrite:", e);
+      }
+    }
+
+    await invoke("sftp_rename", {
+      serverId: currentServerId,
+      oldPath,
+      newPath: destPath,
+    });
+
+    await get().loadDirectory(sourceParent);
+    if (sourceParent !== cleanTargetDir) {
+      await get().loadDirectory(cleanTargetDir);
+    }
   },
 
   createFile: async (parentPath: string, name: string) => {

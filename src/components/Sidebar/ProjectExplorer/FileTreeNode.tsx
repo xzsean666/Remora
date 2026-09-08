@@ -10,18 +10,22 @@ interface FileTreeNodeProps {
   entry: FileEntry;
   level?: number;
   onOpenFile?: (path: string, isPreview?: boolean) => void;
+  onInternalDrop?: (e: React.DragEvent, targetDir: string) => void;
 }
 
 export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
   entry,
   level = 0,
   onOpenFile,
+  onInternalDrop,
 }) => {
   const {
     tree,
     expandedPaths,
     selectedPath,
     loadingPaths,
+    dragOverPath,
+    setDragOverPath,
     toggleExpand,
     setSelectedPath,
     createFile,
@@ -36,7 +40,10 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
   const isExpanded = expandedPaths.includes(entry.path);
   const isSelected = selectedPath === entry.path;
   const isLoading = loadingPaths.includes(entry.path);
+  const isDragOver = entry.is_dir && dragOverPath === entry.path;
   const children = tree[entry.path] || [];
+
+  const parentPath = entry.path.substring(0, entry.path.lastIndexOf("/")) || "/";
 
   // Local interaction states
   const [isRenaming, setIsRenaming] = useState(false);
@@ -67,16 +74,71 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
     setContextMenuPos({ x: e.clientX, y: e.clientY });
   };
 
+  const handleDragStart = (e: React.DragEvent) => {
+    if (isRenaming) return;
+    e.dataTransfer.setData(
+      "application/remora-entry",
+      JSON.stringify({
+        path: entry.path,
+        name: entry.name,
+        is_dir: entry.is_dir,
+      })
+    );
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    if (entry.is_dir) {
+      if (dragOverPath !== entry.path) {
+        setDragOverPath(entry.path);
+      }
+    } else {
+      if (dragOverPath !== parentPath) {
+        setDragOverPath(parentPath);
+      }
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (entry.is_dir && dragOverPath === entry.path) {
+      setDragOverPath(null);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverPath(null);
+    const targetDir = entry.is_dir ? entry.path : parentPath;
+    onInternalDrop?.(e, targetDir);
+  };
+
   return (
     <div className="flex flex-col select-none text-xs">
       {/* Node Row */}
       <div
+        draggable={!isRenaming}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
+        data-folder-path={entry.is_dir ? entry.path : undefined}
+        data-file-path={!entry.is_dir ? entry.path : undefined}
+        data-parent-path={parentPath}
+        data-is-dir={entry.is_dir ? "true" : "false"}
         style={{ paddingLeft: `${Math.max(6, level * 14 + 6)}px` }}
-        className={`h-6 flex items-center pr-2 cursor-pointer transition-colors group relative min-w-0 overflow-hidden ${
-          isSelected
+        className={`h-6 flex items-center pr-2 cursor-pointer transition-all group relative min-w-0 overflow-hidden ${
+          isDragOver
+            ? "bg-vscode-activityBarActive/25 ring-1 ring-inset ring-vscode-activityBarActive text-white"
+            : isSelected
             ? "bg-vscode-selected text-white"
             : "text-vscode-text hover:bg-vscode-hover hover:text-vscode-textBright"
         }`}
@@ -163,6 +225,7 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
               entry={child}
               level={level + 1}
               onOpenFile={onOpenFile}
+              onInternalDrop={onInternalDrop}
             />
           ))}
 

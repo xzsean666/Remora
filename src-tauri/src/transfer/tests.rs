@@ -26,6 +26,33 @@ mod tests {
         assert!(res.is_err());
     }
 
+    #[tokio::test]
+    async fn test_start_upload_nonexistent_local_file() {
+        let conn = Arc::new(ConnectionManager::new());
+        let sftp = Arc::new(SftpService::new(conn));
+        let manager = TransferManager::new(sftp);
+
+        let res = manager.start_upload("srv-1", "/nonexistent/path/here", "/remote/test", None).await;
+        assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_start_upload_local_directory() {
+        let conn = Arc::new(ConnectionManager::new());
+        let sftp = Arc::new(SftpService::new(conn));
+        let manager = TransferManager::new(sftp);
+
+        let temp_dir = std::env::temp_dir();
+        let test_dir = temp_dir.join(format!("remora_test_upload_dir_{}", std::process::id()));
+        let _ = tokio::fs::create_dir_all(&test_dir).await;
+        let _ = tokio::fs::write(test_dir.join("sample.txt"), "hello").await;
+
+        let res = manager.start_upload("srv-1", test_dir.to_str().unwrap(), "/remote/test_dir", None).await;
+        assert!(res.is_ok());
+
+        let _ = tokio::fs::remove_dir_all(&test_dir).await;
+    }
+
     #[test]
     fn test_transfer_model_serialization() {
         let item = crate::transfer::model::TransferItem {

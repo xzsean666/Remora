@@ -26,7 +26,10 @@ import { FileTreeNode } from "./FileTreeNode";
 import { NewItemInput } from "./NewItemInput";
 import { ContextMenu } from "../ContextMenu";
 import { OpenFolderModal } from "./OpenFolderModal";
-import { safeInvoke as invoke } from "../../../utils/tauriBridge";
+import { safeInvoke as invoke, isRunningInTauri } from "../../../utils/tauriBridge";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { useTransferStore } from "../../../stores/transferStore";
+import { FileConflictModal, FileConflictItem } from "./FileConflictModal";
 
 function formatTimeAgo(timestamp: number): string {
   if (!timestamp) return "";
@@ -48,6 +51,7 @@ interface ProjectExplorerProps {
 export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) => {
   const {
     rootPath,
+    currentServerId,
     tree,
     collapseAll,
     createFile,
@@ -60,7 +64,13 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
     removeRecentProject,
     loadingPaths,
     dirErrors,
+    dragOverPath,
+    setDragOverPath,
+    checkFileExists,
+    moveItem,
   } = useFileTreeStore();
+
+  const { uploadFile } = useTransferStore();
 
   const {
     serversList,
@@ -80,6 +90,257 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
   const [showOpenModal, setShowOpenModal] = useState(false);
   const [modalTargetServerId, setModalTargetServerId] = useState<string | null>(null);
   const [connectingServerId, setConnectingServerId] = useState<string | null>(null);
+  const [conflicts, setConflicts] = useState<FileConflictItem[]>([]);
+
+  const lastProcessedDropRef = React.useRef<{ key: string; time: number }>({ key: "", time: 0 });
+
+  const shouldProcessDrop = (key: string) => {
+    const now = Date.now();
+    if (lastProcessedDropRef.current.key === key && now - lastProcessedDropRef.current.time < 1000) {
+      return false;
+    }
+    lastProcessedDropRef.current = { key, time: now };
+    return true;
+  };
+
+  const handleDroppedPaths = async (paths: string[], targetDir: string) => {
+    const targetServer = currentServerId || activeServerId;
+    if (!targetServer || !paths || paths.length === 0) return;
+
+    const key = `${targetDir}:${paths.join(";")}`;
+    if (!shouldProcessDrop(key)) return;
+
+    const cleanTargetDir = targetDir.replace(/\/+$/, "");
+    const newConflicts: FileConflictItem[] = [];
+
+    for (const localPath of paths) {
+      const filename = localPath.split(/[/\\]/).filter(Boolean).pop() || "file";
+      const destPath = `${cleanTargetDir}/${filename}`;
+      const exists = await checkFileExists(targetServer, destPath);
+
+      if (exists) {
+        newConflicts.push({
+          id: `upload-${Date.now()}-${Math.random()}`,
+          filename,
+          sourcePath: localPath,
+          targetDir: cleanTargetDir,
+          isInternalMove: false,
+        });
+      } else {
+        try {
+          await uploadFile(targetServer, localPath, destPath);
+        } catch (err) {
+          console.error(`Failed to upload ${localPath}:`, err);
+        }
+      }
+    }
+
+    await refreshPath(cleanTargetDir);
+
+    if (newConflicts.length > 0) {
+      setConflicts((prev) => [...prev, ...newConflicts]);
+    }
+  };
+
+  const handleInternalMove = async (
+    entry: { path: string; name: string; is_dir: boolean },
+    targetDir: string
+  ) => {
+    const targetServer = currentServerId || activeServerId;
+    if (!targetServer) return;
+
+    const cleanTargetDir = targetDir.replace(/\/+$/, "");
+    const parts = entry.path.split("/");
+    parts.pop();
+    const sourceParent = parts.join("/") || rootPath || "/";
+
+    if (sourceParent === cleanTargetDir) return;
+
+    if (
+      entry.is_dir &&
+      (cleanTargetDir === entry.path || cleanTargetDir.startsWith(`${entry.path}/`))
+    ) {
+      alert("Cannot move a folder into itself or its subfolder / 不能将文件夹移动到其自身或子文件夹中");
+      return;
+    }
+
+    const destPath = `${cleanTargetDir}/${entry.name}`;
+    const exists = await checkFileExists(targetServer, destPath);
+
+    if (exists) {
+      setConflicts((prev) => [
+        ...prev,
+        {
+          id: `move-${Date.now()}-${Math.random()}`,
+          filename: entry.name,
+          sourcePath: entry.path,
+          targetDir: cleanTargetDir,
+          isInternalMove: true,
+        },
+      ]);
+    } else {
+      await moveItem(entry.path, cleanTargetDir);
+    }
+  };
+
+  // Conflict actions
+  const currentConflict = conflicts[0] || null;
+
+  const handleConflictReplace = async () => {
+    const targetServer = currentServerId || activeServerId;
+    if (!currentConflict || !targetServer) return;
+    const item = currentConflict;
+    setConflicts((prev) => prev.slice(1));
+
+    try {
+      if (item.isInternalMove) {
+        await moveItem(item.sourcePath, item.targetDir, item.filename, true);
+      } else {
+        const destPath = `${item.targetDir.replace(/\/+$/, "")}/${item.filename}`;
+        await uploadFile(targetServer, item.sourcePath, destPath);
+        await refreshPath(item.targetDir);
+      }
+    } catch (err) {
+      console.error("Replace failed:", err);
+    }
+  };
+
+  const handleConflictRename = async (newName: string) => {
+    const targetServer = currentServerId || activeServerId;
+    if (!currentConflict || !targetServer) return;
+    const item = currentConflict;
+    setConflicts((prev) => prev.slice(1));
+
+    try {
+      if (item.isInternalMove) {
+        await moveItem(item.sourcePath, item.targetDir, newName, false);
+      } else {
+        const destPath = `${item.targetDir.replace(/\/+$/, "")}/${newName}`;
+        await uploadFile(targetServer, item.sourcePath, destPath);
+        await refreshPath(item.targetDir);
+      }
+    } catch (err) {
+      console.error("Rename failed:", err);
+    }
+  };
+
+  const handleConflictCancel = () => {
+    setConflicts((prev) => prev.slice(1));
+  };
+
+  const handleConflictReplaceAll = async () => {
+    const targetServer = currentServerId || activeServerId;
+    if (!targetServer) return;
+    const all = [...conflicts];
+    setConflicts([]);
+
+    for (const item of all) {
+      try {
+        if (item.isInternalMove) {
+          await moveItem(item.sourcePath, item.targetDir, item.filename, true);
+        } else {
+          const destPath = `${item.targetDir.replace(/\/+$/, "")}/${item.filename}`;
+          await uploadFile(targetServer, item.sourcePath, destPath);
+        }
+      } catch (err) {
+        console.error("Replace all failed on item:", item.filename, err);
+      }
+    }
+    const targetDirs = Array.from(new Set(all.map((i) => i.targetDir)));
+    for (const d of targetDirs) {
+      await refreshPath(d);
+    }
+  };
+
+  // Native Tauri drag & drop listener
+  useEffect(() => {
+    if (!isRunningInTauri() || !rootPath) return;
+
+    let unlisten: (() => void) | null = null;
+    let isCancelled = false;
+
+    try {
+      const webview = getCurrentWebview();
+      webview
+        .onDragDropEvent((event) => {
+          if (isCancelled) return;
+          const payload = event.payload;
+
+          if (payload.type === "enter" || payload.type === "over") {
+            const pos = payload.position;
+            const scale = window.devicePixelRatio || 1;
+            const clientX = pos.x / scale;
+            const clientY = pos.y / scale;
+
+            let el = document.elementFromPoint(clientX, clientY);
+            if (!el) el = document.elementFromPoint(pos.x, pos.y);
+
+            const folderEl = el?.closest("[data-folder-path]");
+            const fileEl = el?.closest("[data-file-path]");
+            const containerEl = el?.closest("[data-explorer-container]");
+
+            if (folderEl) {
+              const path = folderEl.getAttribute("data-folder-path");
+              setDragOverPath(path);
+            } else if (fileEl) {
+              const parent = fileEl.getAttribute("data-parent-path");
+              setDragOverPath(parent);
+            } else if (containerEl) {
+              setDragOverPath(rootPath);
+            } else {
+              setDragOverPath(null);
+            }
+          } else if (payload.type === "leave") {
+            setDragOverPath(null);
+          } else if (payload.type === "drop") {
+            const pos = payload.position;
+            const scale = window.devicePixelRatio || 1;
+            const clientX = pos.x / scale;
+            const clientY = pos.y / scale;
+
+            let el = document.elementFromPoint(clientX, clientY);
+            if (!el) el = document.elementFromPoint(pos.x, pos.y);
+
+            const folderEl = el?.closest("[data-folder-path]");
+            const fileEl = el?.closest("[data-file-path]");
+            const containerEl = el?.closest("[data-explorer-container]");
+
+            let targetDir: string | null = null;
+            if (folderEl) {
+              targetDir = folderEl.getAttribute("data-folder-path");
+            } else if (fileEl) {
+              targetDir = fileEl.getAttribute("data-parent-path");
+            } else if (containerEl) {
+              targetDir = rootPath;
+            }
+
+            setDragOverPath(null);
+
+            if (targetDir && payload.paths && payload.paths.length > 0) {
+              handleDroppedPaths(payload.paths, targetDir);
+            }
+          }
+        })
+        .then((fn) => {
+          if (isCancelled) {
+            fn();
+          } else {
+            unlisten = fn;
+          }
+        })
+        .catch((err) => {
+          console.warn("Failed to listen to onDragDropEvent:", err);
+        });
+    } catch (e) {
+      console.warn("Error setting up onDragDropEvent:", e);
+    }
+
+    return () => {
+      isCancelled = true;
+      if (unlisten) unlisten();
+      setDragOverPath(null);
+    };
+  }, [rootPath, currentServerId, activeServerId]);
 
   useEffect(() => {
     loadServers();
@@ -519,6 +780,76 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
     setContextMenuPos({ x: e.clientX, y: e.clientY });
   };
 
+  const handleContainerDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+    if (dragOverPath !== rootPath) {
+      setDragOverPath(rootPath);
+    }
+  };
+
+  const handleContainerDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (dragOverPath === rootPath) {
+      setDragOverPath(null);
+    }
+  };
+
+  const handleContainerDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverPath(null);
+    if (!rootPath) return;
+
+    const remoraRaw = e.dataTransfer.getData("application/remora-entry");
+    if (remoraRaw) {
+      try {
+        const item = JSON.parse(remoraRaw);
+        handleInternalMove(item, rootPath);
+      } catch {}
+      return;
+    }
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const filePaths: string[] = [];
+      for (let i = 0; i < e.dataTransfer.files.length; i++) {
+        const f = e.dataTransfer.files[i] as any;
+        if (f.path) filePaths.push(f.path);
+      }
+      if (filePaths.length > 0) {
+        handleDroppedPaths(filePaths, rootPath);
+      }
+    }
+  };
+
+  const handleInternalDrop = (e: React.DragEvent, targetDir: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverPath(null);
+
+    const remoraRaw = e.dataTransfer.getData("application/remora-entry");
+    if (remoraRaw) {
+      try {
+        const item = JSON.parse(remoraRaw);
+        handleInternalMove(item, targetDir);
+      } catch {}
+      return;
+    }
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const filePaths: string[] = [];
+      for (let i = 0; i < e.dataTransfer.files.length; i++) {
+        const f = e.dataTransfer.files[i] as any;
+        if (f.path) filePaths.push(f.path);
+      }
+      if (filePaths.length > 0) {
+        handleDroppedPaths(filePaths, targetDir);
+      }
+    }
+  };
+
   return (
     <div className="flex flex-col h-full overflow-hidden select-none">
       {/* Explorer Section Title & Actions Header */}
@@ -586,8 +917,16 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
 
       {/* Tree Content */}
       <div
+        data-explorer-container="true"
         onContextMenu={handleRootContextMenu}
-        className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden py-1"
+        onDragOver={handleContainerDragOver}
+        onDragLeave={handleContainerDragLeave}
+        onDrop={handleContainerDrop}
+        className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden py-1 transition-all ${
+          dragOverPath === rootPath
+            ? "bg-vscode-selected/10 ring-2 ring-inset ring-vscode-activityBarActive/40"
+            : ""
+        }`}
       >
         {/* Creating new item in root */}
         {creatingType && (
@@ -664,6 +1003,7 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
                 entry={entry}
                 level={0}
                 onOpenFile={onOpenFile}
+                onInternalDrop={handleInternalDrop}
               />
             ))}
 
@@ -714,6 +1054,20 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
         onClose={() => setShowOpenModal(false)}
         targetServerId={modalTargetServerId || activeServerId}
       />
+
+      {/* File Conflict Resolution Modal */}
+      {currentConflict && (
+        <FileConflictModal
+          conflict={currentConflict}
+          currentIndex={1}
+          totalConflicts={conflicts.length}
+          existingNames={tree[currentConflict.targetDir]?.map((e) => e.name) || []}
+          onReplace={handleConflictReplace}
+          onRename={handleConflictRename}
+          onCancel={handleConflictCancel}
+          onReplaceAll={conflicts.length > 1 ? handleConflictReplaceAll : undefined}
+        />
+      )}
     </div>
   );
 };

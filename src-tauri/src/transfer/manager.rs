@@ -153,6 +153,37 @@ impl TransferManager {
             Self::emit_progress(&app_handle, &item);
         }
 
+        let is_dir = match tokio::fs::metadata(&local_path).await {
+            Ok(m) => m.is_dir(),
+            Err(e) => {
+                Self::fail_task(&task, &app_handle, format!("Failed to stat local file: {}", e)).await;
+                return;
+            }
+        };
+
+        if is_dir {
+            if let Err(e) = Self::upload_directory_recursive(
+                sftp_service,
+                &server_id,
+                Path::new(&local_path),
+                &remote_path,
+                &task,
+                &app_handle,
+            )
+            .await
+            {
+                Self::fail_task(&task, &app_handle, e.to_string()).await;
+                return;
+            }
+
+            let mut item = task.item.write().await;
+            item.status = TransferStatus::Completed;
+            item.updated_at = chrono::Utc::now().timestamp_millis();
+            Self::emit_progress(&app_handle, &item);
+            info!("Directory upload task {} completed successfully", item.id);
+            return;
+        }
+
         let session_res = sftp_service.get_or_create_session(&server_id).await;
         let session = match session_res {
             Ok(s) => s,
@@ -246,6 +277,119 @@ impl TransferManager {
         item.updated_at = chrono::Utc::now().timestamp_millis();
         Self::emit_progress(&app_handle, &item);
         info!("Upload task {} completed successfully", item.id);
+    }
+
+    async fn upload_directory_recursive(
+        sftp_service: Arc<SftpService>,
+        server_id: &str,
+        local_dir: &Path,
+        remote_dir: &str,
+        task: &Arc<TaskHandle>,
+        app_handle: &Option<tauri::AppHandle>,
+    ) -> Result<()> {
+        let _ = sftp_service.create_dir(server_id, remote_dir).await;
+
+        let mut dir_reader = tokio::fs::read_dir(local_dir)
+            .await
+            .map_err(|e| AppError::Sftp(format!("Failed to read local dir: {}", e)))?;
+
+        while let Some(entry) = dir_reader
+            .next_entry()
+            .await
+            .map_err(|e| AppError::Sftp(e.to_string()))?
+        {
+            if task.cancelled.load(Ordering::SeqCst) {
+                return Ok(());
+            }
+            let file_type = entry
+                .file_type()
+                .await
+                .map_err(|e| AppError::Sftp(e.to_string()))?;
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            let child_remote = format!("{}/{}", remote_dir.trim_end_matches('/'), name_str);
+            let child_local = entry.path();
+
+            if file_type.is_dir() {
+                Box::pin(Self::upload_directory_recursive(
+                    sftp_service.clone(),
+                    server_id,
+                    &child_local,
+                    &child_remote,
+                    task,
+                    app_handle,
+                ))
+                .await?;
+            } else {
+                Self::upload_file_stream(
+                    sftp_service.clone(),
+                    server_id,
+                    &child_local,
+                    &child_remote,
+                    task,
+                    app_handle,
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn upload_file_stream(
+        sftp_service: Arc<SftpService>,
+        server_id: &str,
+        local_path: &Path,
+        remote_path: &str,
+        task: &Arc<TaskHandle>,
+        app_handle: &Option<tauri::AppHandle>,
+    ) -> Result<()> {
+        let session = sftp_service.get_or_create_session(server_id).await?;
+        let mut local_file = tokio::fs::File::open(local_path)
+            .await
+            .map_err(|e| AppError::Sftp(format!("Failed to open local file: {}", e)))?;
+
+        let remote_file_res = {
+            let sftp = session.lock().await;
+            sftp.open_with_flags(
+                remote_path,
+                OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE,
+            )
+            .await
+        };
+
+        let mut remote_file = remote_file_res
+            .map_err(|e| AppError::Sftp(format!("Failed to open remote file: {}", e)))?;
+
+        let mut buffer = vec![0u8; CHUNK_SIZE];
+        loop {
+            if task.cancelled.load(Ordering::SeqCst) {
+                return Ok(());
+            }
+            let read_bytes = local_file
+                .read(&mut buffer)
+                .await
+                .map_err(|e| AppError::Sftp(format!("Read local file error: {}", e)))?;
+            if read_bytes == 0 {
+                break;
+            }
+            remote_file
+                .write_all(&buffer[..read_bytes])
+                .await
+                .map_err(|e| AppError::Sftp(format!("Write SFTP file error: {}", e)))?;
+
+            {
+                let mut item = task.item.write().await;
+                item.transferred_bytes += read_bytes as u64;
+                item.updated_at = chrono::Utc::now().timestamp_millis();
+                Self::emit_progress(app_handle, &item);
+            }
+        }
+
+        remote_file
+            .flush()
+            .await
+            .map_err(|e| AppError::Sftp(format!("Flush SFTP file error: {}", e)))?;
+        Ok(())
     }
 
     pub async fn start_download(

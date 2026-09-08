@@ -5,78 +5,62 @@
 ---
 
 ## 1. 当前目标与任务
-- **当前 Goal**: 解决终端空闲超时断连卡死与黄色圆点挂死缺陷，构建超时防挂死、毫秒级断连通知与一键/无感自动重连机制
-- **当前 Task**: TASK-022: 终端空闲超时断连检测、超时防挂死与无感自动重连优化
-- **当前状态**: IN_PROGRESS
+- **当前 Goal**: 解决目录文件拖拽无响应缺陷，实现拖拽目标高亮感应、同名文件冲突精准检测与替换/重命名弹窗处理
+- **当前 Task**: TASK-023: 目录文件拖拽上传交互根治、同名冲突检测与替换/重命名弹窗处理
+- **当前状态**: DONE
 
 ---
 
 ## 2. 本次会话完成内容
-1. 完成 **TASK-001 ~ TASK-020**: Remora MVP 核心功能、远程代理支持、No Proxy 白名单、自动化构建体系、UI 容器溢出修复、SSH 命令行快速解析导入、Linux Keyring Tokio 冲突彻底解决、私钥波浪号路径展开、多服务器并发连接、按服务器分类的项目管理工作流、集成终端中文/CJK 输入法双重与多次输入缺陷根治。
-2. 完成 **TASK-021**:
-   - **多窗口架构支持 (Multi-Window Architecture)**:
-     - 引入 `tauri-plugin-single-instance = "2"`，主进程拦截外部新进程请求。当外部以参数（如 `remora --new-window`）启动时，自动唤醒现有主进程并开出全新独立 Webview 窗口；无参数时将现有窗口置顶聚焦。
-     - 在 Rust 后端实现 `open_new_window` 与 `create_new_window` 指令；前端通过 `createNewWindow` 安全调用。
-     - 应用内增加全局快捷键 `Ctrl+Shift+N` (Mac 下 `Cmd+Shift+N`) 随时新建窗口。
-     - ActivityBar 底部增加 "New Window (Ctrl+Shift+N)" 操作按钮。
-     - SQLite 连接开启 `PRAGMA journal_mode=WAL;` 与 `PRAGMA busy_timeout=5000;`，确保多窗口并发读写不互锁。
-   - **Ubuntu 桌面右键菜单深度集成 (Desktop Actions)**:
-     - 编写符合 FreeDesktop 规范的 Handlebars 模板 `src-tauri/templates/desktop.template`，声明 `Actions=new-window;` 及 `[Desktop Action new-window]`（包含中英文名称与 `--new-window` 执行参数）。
-     - 生成并提供本地快速安装脚本 `scripts/install-desktop.sh`，在当前机器立即注册 `~/.local/share/applications/remora.desktop` 与高清应用图标，Ubuntu Dock 右键即刻呈现“新建窗口”。
-   - **一键安装包打包构建 (Linux .deb & Signatures)**:
-     - 配置 `tauri.conf.json` 支持 `deb` bundle 与 `createUpdaterArtifacts: true`。
-     - 增强 `build.sh`：自动检测/导出 `TAURI_SIGNING_PRIVATE_KEY` 签名密钥，生成并归档 `Remora_0.1.0_amd64.deb`、`.deb.sig` 签名文件及 SHA256SUMS.txt，输出至 `release/linux_x64/`。任何 Linux 机器使用 `sudo dpkg -i Remora_0.1.0_amd64.deb` 即可一键完成系统级安装与桌面快捷方式注册。
-   - **自动化检测与升级体系 (Auto-Updater)**:
-     - 引入 `tauri-plugin-updater = "2"` 与 `@tauri-apps/plugin-updater = "^2"`。
-     - 生成 Minisign 密钥对，公钥内置于 `tauri.conf.json`，更新源配置为 `https://github.com/xzsean666/Remora/releases/latest/download/latest.json`。
-     - 在 `src-tauri/capabilities/default.json` 声明权限。
-     - 前端启动 3 秒后静默检查更新，发现新版本弹出高对比度顶部通知条（支持“Upgrade & Restart”与忽略）；Settings 面板中亦提供“Check for Updates”手动检测入口。
-   - **GitHub 发布流水线与身份鉴权**:
-     - 编写 `.github/workflows/release.yml`，推送 `v*` 标签全自动触发构建、打包 deb/AppImage、签名产物并创建 GitHub Release。
-     - 解决 DBus 隔离环境下的 Keyring 访问问题，成功激活 `xzsean666` GitHub 账户并完成鉴权。
+1. 完成 **TASK-022**: 终端空闲超时断连检测、超时防挂死与无感自动重连优化（已提交至 git commit `f9762f4`）。
+2. 完成 **TASK-023**:
+   - **Tauri 原生与 HTML5 双模拖拽交互接入**:
+     - 在 `ProjectExplorer.tsx` 接入 `getCurrentWebview().onDragDropEvent` 原生事件流，实现物理坐标自动依据 `window.devicePixelRatio` 映射至 CSS 视口坐标，并通过 `document.elementFromPoint` 精准计算落点（文件夹节点、文件父级或工作区根目录）。
+     - 支持 HTML5 拖拽事件（`onDragOver`, `onDragLeave`, `onDrop`），为 `FileTreeNode.tsx` 注入 `draggable`、数据载荷传输与悬停感应。
+   - **实时拖拽目标高亮感应**:
+     - 拖拽悬停至任意目标目录或工作区根区域时，触发即时轮廓高亮（`ring-1/2 ring-vscode-activityBarActive` 与柔和高亮底色），离开或放下时即刻清理。
+   - **同名文件冲突精准探测与拦截**:
+     - 拖拽放下时，结合 `sftp_stat` 与内存缓存树，逐项探测目标路径是否存在同名文件。
+     - 若无同名冲突，自动调用 `uploadFile` 启动后台流式传输，并在完成后自动调用 `refreshPath` 刷新目录。
+   - **文件冲突处理模态框 (FileConflictModal)**:
+     - 打造符合 VS Code 风格的深色高对比度模态弹窗 `FileConflictModal.tsx`。
+     - 显示冲突文件名与目标目录，提供带自动自增建议（如 `name (1).ext`）的可编辑重命名输入框。
+     - 提供“替换 (Replace)”、“重命名 (Rename)”、“取消 (Cancel)”以及多文件冲突时的“全部替换 (Replace All)”动作。
+   - **后端目录递归流式上传增强**:
+     - 在 `src-tauri/src/transfer/manager.rs` 中强化 `execute_upload`：自动探测本地路径是否为目录，支持使用 `upload_directory_recursive` 与 `upload_file_stream` 将整目录树与各层文件无损流式同步至远端 SFTP，保留取消信号与字节进度上报。
 
 ---
 
 ## 3. 修改与创建的文件
 - **新建文件**:
-  - `docs/AI/tasks/TASK-021.md`
-  - `src-tauri/templates/desktop.template`
-  - `src-tauri/capabilities/default.json`
-  - `scripts/install-desktop.sh`
-  - `.github/workflows/release.yml`
+  - `docs/AI/tasks/TASK-023.md`
+  - `src/components/Sidebar/ProjectExplorer/FileConflictModal.tsx`
 - **修改文件**:
-  - `src-tauri/Cargo.toml`
-  - `src-tauri/tauri.conf.json`
-  - `src-tauri/src/lib.rs`
-  - `src-tauri/src/storage/db.rs`
-  - `package.json`
-  - `pnpm-lock.yaml`
-  - `src/App.tsx`
-  - `src/components/ActivityBar/ActivityBar.tsx`
+  - `src/components/Sidebar/ProjectExplorer/ProjectExplorer.tsx`
+  - `src/components/Sidebar/ProjectExplorer/FileTreeNode.tsx`
+  - `src/stores/fileTreeStore.ts`
   - `src/utils/tauriBridge.ts`
-  - `build.sh`
+  - `src-tauri/src/transfer/manager.rs`
+  - `src-tauri/src/transfer/tests.rs`
   - `docs/AI/TASK_INDEX.md`
   - `docs/AI/SESSION_STATE.md`
 
 ---
 
 ## 4. 已运行的验证命令及结果
-- `cargo check --manifest-path src-tauri/Cargo.toml`: 成功，0 错误 0 告警。
-- `cargo test --manifest-path src-tauri/Cargo.toml`: 成功，17 组测试 100% 全部通过。
-- `pnpm tsc --noEmit`: 成功执行，前端 TypeScript 类型检查 0 报错。
-- `pnpm build`: 成功执行 `tsc && vite build`，前端产物打包完成。
-- `./build.sh --deb`: 成功构建出 `Remora_0.1.0_amd64.deb` 与 `.deb.sig` 签名。
-- `dpkg-deb -c`: 验证生成的 `.deb` 内部正确包含 `Actions=new-window;` 的 desktop 启动配置。
-- `./scripts/install-desktop.sh`: 成功将启动器与图标注册至系统桌面目录。
+- `cargo check --manifest-path src-tauri/Cargo.toml`: 编译检查通过，0 错误 0 告警。
+- `cargo test --manifest-path src-tauri/Cargo.toml`: 19 组单元测试 + 1 组 e2e 测试全部 100% 通过（新增目录上传及本地文件不存在错误拦截测试）。
+- `pnpm tsc --noEmit`: 前端 TypeScript 类型检查 0 报错通过。
+- `pnpm build`: Vite 打包编译完成，输出 `dist/` 产物。
+- `suggestNewName` 单元逻辑验证（多重同名数字递增与无后缀支持）全部通过。
 
 ---
 
 ## 5. 未解决问题与剩余风险
-- 无。各平台包管理、桌面动作、自动升级与 GitHub 发布流程均已闭环。
+- 无。拖拽无响应、同名冲突拦截、替换与重命名另存、目录递归上传均已全部解决并闭环。
 
 ---
 
 ## 6. 下一步执行计划
-- 提交 Git Commit 并推送至 GitHub（`xzsean666/Remora`）。
-- 打 tag（如 `v0.1.0`）并在 GitHub 上创建 Release，上传 `.deb`、`.deb.sig` 与校验和文件。
+- 保持各模块稳定运行，就新增特性提交 Git 变更。
 

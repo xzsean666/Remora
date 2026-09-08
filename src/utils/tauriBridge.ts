@@ -280,6 +280,35 @@ export async function safeInvoke<T = any>(cmd: string, args?: Record<string, any
         current_version: "0.1.0",
       } as unknown as T;
     }
+    case "sftp_stat": {
+      const p = (args?.path as string) || "";
+      return {
+        name: p.split("/").pop() || "file",
+        path: p,
+        is_dir: false,
+        is_symlink: false,
+        size: 1024,
+        mtime: Date.now(),
+      } as unknown as T;
+    }
+    case "sftp_rename":
+    case "sftp_remove":
+    case "sftp_create_file":
+    case "sftp_create_dir": {
+      return undefined as unknown as T;
+    }
+    case "transfer_upload": {
+      return `mock-upload-${Date.now()}` as unknown as T;
+    }
+    case "transfer_download": {
+      return `mock-download-${Date.now()}` as unknown as T;
+    }
+    case "transfer_list": {
+      return [] as unknown as T;
+    }
+    case "transfer_cancel": {
+      return undefined as unknown as T;
+    }
     case "install_update": {
       return undefined as unknown as T;
     }

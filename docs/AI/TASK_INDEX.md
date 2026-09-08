@@ -30,17 +30,18 @@
 | **TASK-019** | 多 SSH 服务器并发连接状态维护、活动服务器激活切换与远程项目目录打开工作流 | TASK-002, TASK-003, TASK-004, TASK-007, TASK-017, TASK-018 | **DONE** | `docs/AI/tasks/TASK-019.md` |
 | **TASK-020** | 修复集成终端中文/CJK 输入法重复与多次输入缺陷 | TASK-009, TASK-019 | **DONE** | `docs/AI/tasks/TASK-020.md` |
 | **TASK-021** | 多窗口协同、Ubuntu 桌面集成与跨平台自动发布与更新体系 | TASK-015, TASK-020 | **DONE** | `docs/AI/tasks/TASK-021.md` |
-| **TASK-022** | 终端空闲超时断连检测、超时防挂死与无感自动重连优化 | TASK-005, TASK-009, TASK-011, TASK-020 | **IN_PROGRESS** | `docs/AI/tasks/TASK-022.md` |
+| **TASK-022** | 终端空闲超时断连检测、超时防挂死与无感自动重连优化 | TASK-005, TASK-009, TASK-011, TASK-020 | **DONE** | `docs/AI/tasks/TASK-022.md` |
+| **TASK-023** | 目录文件拖拽上传交互根治、同名冲突检测与替换/重命名弹窗处理 | TASK-004, TASK-007, TASK-010 | **DONE** | `docs/AI/tasks/TASK-023.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 22
-- **进行中 (IN_PROGRESS)**: 1
+- **已完成 (DONE)**: 24
+- **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 23
+- **总任务数**: 24
 
 ---
 
