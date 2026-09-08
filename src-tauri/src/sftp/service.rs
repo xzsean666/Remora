@@ -198,15 +198,127 @@ impl SftpService {
         let sftp = session_arc.lock().await;
 
         if is_dir {
-            sftp.remove_dir(path)
-                .await
-                .map_err(|e| AppError::Sftp(format!("Failed to remove directory {}: {}", path, e)))?;
+            Self::remove_remote_dir_recursive(&sftp, path).await?;
         } else {
             sftp.remove_file(path)
                 .await
                 .map_err(|e| AppError::Sftp(format!("Failed to remove file {}: {}", path, e)))?;
         }
         Ok(())
+    }
+
+    async fn remove_remote_dir_recursive(sftp: &SftpSession, path: &str) -> Result<()> {
+        if let Ok(entries) = sftp.read_dir(path).await {
+            for entry in entries {
+                let name = entry.file_name();
+                if name == "." || name == ".." {
+                    continue;
+                }
+                let child_path = format!("{}/{}", path.trim_end_matches('/'), name);
+                if entry.file_type().is_dir() {
+                    Box::pin(Self::remove_remote_dir_recursive(sftp, &child_path)).await?;
+                } else {
+                    let _ = sftp.remove_file(&child_path).await;
+                }
+            }
+        }
+        sftp.remove_dir(path)
+            .await
+            .map_err(|e| AppError::Sftp(format!("Failed to remove directory {}: {}", path, e)))?;
+        Ok(())
+    }
+
+    async fn ensure_remote_dir_recursive(sftp: &SftpSession, path: &str) -> Result<()> {
+        let clean = path.trim_end_matches('/');
+        let parts: Vec<&str> = clean.split('/').filter(|s| !s.is_empty()).collect();
+        let mut current = String::new();
+        for part in parts {
+            current.push('/');
+            current.push_str(part);
+            if sftp.metadata(&current).await.is_err() {
+                let _ = sftp.create_dir(&current).await;
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn trash(&self, server_id: &str, path: &str) -> Result<String> {
+        let session_arc = self.get_or_create_session(server_id).await?;
+        let sftp = session_arc.lock().await;
+
+        // 1. Resolve remote user home directory via canonicalize(".")
+        let home = match sftp.canonicalize(".").await {
+            Ok(h) if !h.trim().is_empty() && h != "/" => h.trim().to_string(),
+            _ => {
+                let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+                if segments.len() >= 2 && segments[0] == "home" {
+                    format!("/home/{}", segments[1])
+                } else {
+                    "/tmp".to_string()
+                }
+            }
+        };
+
+        let trash_base = format!("{}/.local/share/Trash", home.trim_end_matches('/'));
+        let files_dir = format!("{}/files", trash_base);
+        let info_dir = format!("{}/info", trash_base);
+
+        let _ = Self::ensure_remote_dir_recursive(&sftp, &files_dir).await;
+        let _ = Self::ensure_remote_dir_recursive(&sftp, &info_dir).await;
+
+        let file_name = path.split('/').next_back().unwrap_or("item");
+        let now = chrono::Local::now();
+        let timestamp_str = now.format("%Y%m%d_%H%M%S").to_string();
+
+        let mut dest_name = file_name.to_string();
+        let mut dest_path = format!("{}/{}", files_dir, dest_name);
+
+        if sftp.metadata(&dest_path).await.is_ok() {
+            let (stem, ext) = match file_name.rfind('.') {
+                Some(idx) if idx > 0 => (&file_name[..idx], &file_name[idx..]),
+                _ => (file_name, ""),
+            };
+            dest_name = format!("{}_{}{}", stem, timestamp_str, ext);
+            dest_path = format!("{}/{}", files_dir, dest_name);
+        }
+
+        match sftp.rename(path, &dest_path).await {
+            Ok(_) => {
+                // FreeDesktop .trashinfo metadata
+                let trashinfo_path = format!("{}/{}.trashinfo", info_dir, dest_name);
+                let deletion_date = now.format("%Y-%m-%dT%H:%M:%S").to_string();
+                let trashinfo_content = format!(
+                    "[Trash Info]\nPath={}\nDeletionDate={}\n",
+                    path, deletion_date
+                );
+                if let Ok(mut info_file) = sftp
+                    .open_with_flags(
+                        &trashinfo_path,
+                        OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::TRUNCATE,
+                    )
+                    .await
+                {
+                    let _ = info_file.write_all(trashinfo_content.as_bytes()).await;
+                }
+                info!("Successfully moved '{}' to remote trash at '{}'", path, dest_path);
+                Ok(dest_path)
+            }
+            Err(e) => {
+                // Cross-device fallback: move to .remora_trash in parent folder
+                let parent = path.rsplit_once('/').map(|(p, _)| p).unwrap_or("");
+                if !parent.is_empty() {
+                    let fallback_trash = format!("{}/.remora_trash", parent);
+                    if Self::ensure_remote_dir_recursive(&sftp, &fallback_trash).await.is_ok() {
+                        let fallback_dest = format!("{}/{}", fallback_trash, dest_name);
+                        if sftp.rename(path, &fallback_dest).await.is_ok() {
+                            info!("Moved '{}' to local fallback trash at '{}'", path, fallback_dest);
+                            return Ok(fallback_dest);
+                        }
+                    }
+                }
+                Err(AppError::Sftp(format!("Failed to move {} to trash: {}", path, e)))
+            }
+        }
     }
 
     pub async fn stat(&self, server_id: &str, path: &str) -> Result<FileEntry> {

@@ -1,6 +1,18 @@
 import { invoke as tauriInvoke, isTauri as checkIsTauri } from "@tauri-apps/api/core";
 import type { ServerConfig } from "../components/Sidebar/ServerManager/ServerManager";
 
+export interface QuickSnippet {
+  id: string;
+  title: string;
+  command: string;
+  group_name: string;
+  auto_execute: boolean;
+  description?: string | null;
+  sort_order: number;
+  created_at: number;
+  updated_at: number;
+}
+
 /**
  * Checks if the current frontend is running inside the Tauri native desktop window.
  */
@@ -37,6 +49,40 @@ if (typeof window !== "undefined" && !(window as any).__TAURI_INTERNALS__) {
 }
 
 const STORAGE_KEY_SERVERS = "remora_mock_servers";
+const STORAGE_KEY_SNIPPETS = "remora_mock_quick_snippets";
+
+const DEFAULT_MOCK_SNIPPETS: QuickSnippet[] = [
+  { id: "default-sys-1", title: "System Info", command: "uname -a", group_name: "System", auto_execute: true, description: "Print detailed kernel and OS information", sort_order: 1, created_at: Date.now(), updated_at: Date.now() },
+  { id: "default-sys-2", title: "Disk Usage", command: "df -h", group_name: "System", auto_execute: true, description: "Show disk space usage in human-readable units", sort_order: 2, created_at: Date.now(), updated_at: Date.now() },
+  { id: "default-sys-3", title: "Memory Usage", command: "free -h", group_name: "System", auto_execute: true, description: "Display free and used RAM/Swap", sort_order: 3, created_at: Date.now(), updated_at: Date.now() },
+  { id: "default-sys-4", title: "Top Processes", command: "top", group_name: "System", auto_execute: true, description: "Monitor active processes and resource load", sort_order: 4, created_at: Date.now(), updated_at: Date.now() },
+  { id: "default-dock-1", title: "Docker PS", command: "docker ps -a", group_name: "Docker", auto_execute: true, description: "List all running and exited containers", sort_order: 1, created_at: Date.now(), updated_at: Date.now() },
+  { id: "default-dock-2", title: "Docker Images", command: "docker images", group_name: "Docker", auto_execute: true, description: "List all local container images", sort_order: 2, created_at: Date.now(), updated_at: Date.now() },
+  { id: "default-dock-3", title: "Docker Stats", command: "docker stats --no-stream", group_name: "Docker", auto_execute: true, description: "Snapshot of container resource consumption", sort_order: 3, created_at: Date.now(), updated_at: Date.now() },
+  { id: "default-dock-4", title: "Compose Status", command: "docker compose ps", group_name: "Docker", auto_execute: true, description: "List containers in current compose stack", sort_order: 4, created_at: Date.now(), updated_at: Date.now() },
+  { id: "default-net-1", title: "Listening Ports", command: "ss -tulnp", group_name: "Network", auto_execute: true, description: "Show listening TCP/UDP ports", sort_order: 1, created_at: Date.now(), updated_at: Date.now() },
+  { id: "default-net-2", title: "Public IP", command: "curl -s ifconfig.me && echo", group_name: "Network", auto_execute: true, description: "Query public IP address", sort_order: 2, created_at: Date.now(), updated_at: Date.now() },
+  { id: "default-git-1", title: "Git Status", command: "git status", group_name: "Git", auto_execute: true, description: "Check workspace dirty state", sort_order: 1, created_at: Date.now(), updated_at: Date.now() },
+  { id: "default-git-2", title: "Recent Commits", command: "git log --oneline -n 10", group_name: "Git", auto_execute: true, description: "Display recent 10 commits concisely", sort_order: 2, created_at: Date.now(), updated_at: Date.now() },
+];
+
+function getMockSnippets(): QuickSnippet[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_SNIPPETS);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.warn("Failed to read mock snippets from localStorage:", e);
+  }
+  return DEFAULT_MOCK_SNIPPETS;
+}
+
+function saveMockSnippets(snippets: QuickSnippet[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY_SNIPPETS, JSON.stringify(snippets));
+  } catch (e) {
+    console.warn("Failed to save mock snippets to localStorage:", e);
+  }
+}
 
 function getMockServers(): ServerConfig[] {
   try {
@@ -293,6 +339,7 @@ export async function safeInvoke<T = any>(cmd: string, args?: Record<string, any
     }
     case "sftp_rename":
     case "sftp_remove":
+    case "sftp_trash":
     case "sftp_create_file":
     case "sftp_create_dir": {
       return undefined as unknown as T;
@@ -311,6 +358,65 @@ export async function safeInvoke<T = any>(cmd: string, args?: Record<string, any
     }
     case "install_update": {
       return undefined as unknown as T;
+    }
+    case "get_quick_snippets": {
+      return getMockSnippets() as unknown as T;
+    }
+    case "save_quick_snippet": {
+      const snippet = args?.snippet as QuickSnippet;
+      if (snippet) {
+        const snippets = getMockSnippets();
+        const existingIdx = snippets.findIndex((s) => s.id === snippet.id);
+        if (existingIdx !== -1) {
+          snippets[existingIdx] = snippet;
+        } else {
+          snippets.push(snippet);
+        }
+        saveMockSnippets(snippets);
+      }
+      return undefined as unknown as T;
+    }
+    case "delete_quick_snippet": {
+      const id = args?.id as string;
+      if (id) {
+        const snippets = getMockSnippets().filter((s) => s.id !== id);
+        saveMockSnippets(snippets);
+      }
+      return undefined as unknown as T;
+    }
+    case "delete_quick_snippet_group": {
+      const groupName = args?.groupName as string;
+      if (groupName) {
+        const snippets = getMockSnippets().filter((s) => s.group_name !== groupName);
+        saveMockSnippets(snippets);
+      }
+      return undefined as unknown as T;
+    }
+    case "rename_quick_snippet_group": {
+      const oldName = args?.oldName as string;
+      const newName = args?.newName as string;
+      if (oldName && newName) {
+        const snippets = getMockSnippets().map((s) =>
+          s.group_name === oldName ? { ...s, group_name: newName, updated_at: Date.now() } : s
+        );
+        saveMockSnippets(snippets);
+      }
+      return undefined as unknown as T;
+    }
+    case "import_quick_snippets": {
+      const snippets = (args?.snippets as QuickSnippet[]) || [];
+      const overwrite = !!args?.overwrite;
+      const existing = overwrite ? [] : getMockSnippets();
+      for (const s of snippets) {
+        const idx = existing.findIndex((e) => e.id === s.id);
+        if (idx !== -1) {
+          existing[idx] = s;
+        } else {
+          existing.push(s);
+        }
+      }
+      saveMockSnippets(existing);
+      return snippets.length as unknown as T;
     }
     default: {
       throw new Error(
@@ -339,3 +445,29 @@ export async function checkUpdate(): Promise<UpdateInfo> {
 export async function installUpdate(): Promise<void> {
   await safeInvoke("install_update");
 }
+
+export async function getQuickSnippets(): Promise<QuickSnippet[]> {
+  return await safeInvoke<QuickSnippet[]>("get_quick_snippets");
+}
+
+export async function saveQuickSnippet(snippet: QuickSnippet): Promise<void> {
+  await safeInvoke("save_quick_snippet", { snippet });
+}
+
+export async function deleteQuickSnippet(id: string): Promise<void> {
+  await safeInvoke("delete_quick_snippet", { id });
+}
+
+export async function deleteQuickSnippetGroup(groupName: string): Promise<void> {
+  await safeInvoke("delete_quick_snippet_group", { groupName });
+}
+
+export async function renameQuickSnippetGroup(oldName: string, newName: string): Promise<void> {
+  await safeInvoke("rename_quick_snippet_group", { oldName, newName });
+}
+
+export async function importQuickSnippets(snippets: QuickSnippet[], overwrite: boolean = false): Promise<number> {
+  return await safeInvoke<number>("import_quick_snippets", { snippets, overwrite });
+}
+
+

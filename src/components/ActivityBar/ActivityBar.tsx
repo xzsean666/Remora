@@ -1,5 +1,5 @@
 import React from "react";
-import { FolderTree, Server, ArrowLeftRight, Settings, TerminalSquare, CopyPlus } from "lucide-react";
+import { FolderTree, Server, Zap, ArrowLeftRight, Settings, TerminalSquare, CopyPlus } from "lucide-react";
 import { useLayoutStore, SidebarTab } from "../../stores/layoutStore";
 import { createNewWindow } from "../../utils/tauriBridge";
 
@@ -15,6 +15,7 @@ export const ActivityBar: React.FC = () => {
   const navItems: { id: SidebarTab; label: string; icon: React.ReactNode }[] = [
     { id: "explorer", label: "Project Explorer (Ctrl+Shift+E)", icon: <FolderTree className="w-5 h-5" /> },
     { id: "servers", label: "SSH Servers (Ctrl+Shift+S)", icon: <Server className="w-5 h-5" /> },
+    { id: "snippets", label: "Quick Inputs / 快捷命令 (Ctrl+Shift+K)", icon: <Zap className="w-5 h-5" /> },
     { id: "transfers", label: "File Transfers (Ctrl+Shift+T)", icon: <ArrowLeftRight className="w-5 h-5" /> },
   ];
 

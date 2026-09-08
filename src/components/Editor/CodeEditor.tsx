@@ -1,10 +1,11 @@
 import React, { useEffect, useRef } from "react";
-import { EditorState, Extension } from "@codemirror/state";
+import { Compartment, EditorState, Extension } from "@codemirror/state";
 import { EditorView, lineNumbers, highlightActiveLineGutter, highlightActiveLine, drawSelection, dropCursor, keymap } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { foldGutter, foldKeymap, bracketMatching, syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language";
+import { foldGutter, foldKeymap, bracketMatching, syntaxHighlighting, defaultHighlightStyle, LanguageDescription } from "@codemirror/language";
 import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { languages } from "@codemirror/language-data";
 import { useEditorStore, EditorTab } from "../../stores/editorStore";
 
 interface CodeEditorProps {
@@ -14,6 +15,7 @@ interface CodeEditorProps {
 export const CodeEditor: React.FC<CodeEditorProps> = ({ tab }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const langCompartment = useRef(new Compartment());
   const { updateContent, saveActiveFile } = useEditorStore();
 
   // Cache editor states per file path so undo/redo history and cursor positions persist
@@ -31,6 +33,9 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tab }) => {
   useEffect(() => {
     if (!containerRef.current) return;
 
+    let isMounted = true;
+    const langDesc = LanguageDescription.matchFilename(languages, tab.path);
+
     const createExtensions = (): Extension[] => [
       lineNumbers(),
       highlightActiveLineGutter(),
@@ -41,6 +46,7 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tab }) => {
       bracketMatching(),
       highlightActiveLine(),
       highlightSelectionMatches(),
+      langCompartment.current.of(langDesc?.support ? [langDesc.support] : []),
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
       oneDark,
       EditorView.theme({
@@ -103,7 +109,20 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tab }) => {
 
     viewRef.current = view;
 
+    if (langDesc && !langDesc.support) {
+      langDesc.load().then((support) => {
+        if (isMounted && viewRef.current) {
+          viewRef.current.dispatch({
+            effects: langCompartment.current.reconfigure(support),
+          });
+        }
+      }).catch((err) => {
+        console.warn("Failed to load syntax parser for", tab.path, err);
+      });
+    }
+
     return () => {
+      isMounted = false;
       statesRef.current.set(tab.path, view.state);
       view.destroy();
       viewRef.current = null;

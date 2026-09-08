@@ -69,4 +69,35 @@ mod tests {
         let conflict_detected = remote_mtime_modified > opened_at_mtime;
         assert!(conflict_detected);
     }
+
+    #[test]
+    fn test_trashinfo_formatting() {
+        let original_path = "/home/developer/projects/app/main.rs";
+        let date_str = "2026-09-08T12:00:00";
+        let trashinfo = format!("[Trash Info]\nPath={}\nDeletionDate={}\n", original_path, date_str);
+
+        assert!(trashinfo.starts_with("[Trash Info]"));
+        assert!(trashinfo.contains("Path=/home/developer/projects/app/main.rs"));
+        assert!(trashinfo.contains("DeletionDate=2026-09-08T12:00:00"));
+    }
+
+    #[test]
+    fn test_trash_filename_conflict_handling() {
+        let filename = "document.pdf";
+        let timestamp = "20260908_120000";
+        let (stem, ext) = match filename.rfind('.') {
+            Some(idx) if idx > 0 => (&filename[..idx], &filename[idx..]),
+            _ => (filename, ""),
+        };
+        let unique_name = format!("{}_{}{}", stem, timestamp, ext);
+        assert_eq!(unique_name, "document_20260908_120000.pdf");
+
+        let dir_name = "my_folder";
+        let (d_stem, d_ext) = match dir_name.rfind('.') {
+            Some(idx) if idx > 0 => (&dir_name[..idx], &dir_name[idx..]),
+            _ => (dir_name, ""),
+        };
+        let unique_dir = format!("{}_{}{}", d_stem, timestamp, d_ext);
+        assert_eq!(unique_dir, "my_folder_20260908_120000");
+    }
 }

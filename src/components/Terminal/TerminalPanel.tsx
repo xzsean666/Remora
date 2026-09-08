@@ -1,15 +1,18 @@
-import React from "react";
+import React, { useState } from "react";
 import { Terminal as TerminalIcon, Plus } from "lucide-react";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { TerminalTabBar } from "./TerminalTabBar";
+import { TerminalQuickBar } from "./TerminalQuickBar";
 import { XtermView } from "./XtermView";
 
 export const TerminalPanel: React.FC = () => {
   const { sessions, activeSessionId, addSession } = useTerminalStore();
   const { currentServerId, rootPath } = useFileTreeStore();
   const { connectedServerProxy, activeServerId, connectedServerName } = useConnectionStore();
+
+  const [isQuickBarOpen, setIsQuickBarOpen] = useState(true);
 
   const effectiveServerId = activeServerId || currentServerId;
 
@@ -34,7 +37,15 @@ export const TerminalPanel: React.FC = () => {
   return (
     <div className="w-full h-full flex flex-col bg-vscode-terminal overflow-hidden select-none">
       {/* Terminal Tab Bar */}
-      <TerminalTabBar />
+      <TerminalTabBar
+        isQuickBarOpen={isQuickBarOpen}
+        onToggleQuickBar={() => setIsQuickBarOpen(!isQuickBarOpen)}
+      />
+
+      {/* Embedded Quick Commands Bar */}
+      {isQuickBarOpen && (
+        <TerminalQuickBar onClose={() => setIsQuickBarOpen(false)} />
+      )}
 
       {/* Terminal Sessions Container */}
       <div className="flex-1 relative overflow-hidden bg-[#181818]">

@@ -8,6 +8,7 @@ import { ServerManager } from "./components/Sidebar/ServerManager/ServerManager"
 import { EditorArea } from "./components/Editor/EditorArea";
 import { TerminalPanel } from "./components/Terminal/TerminalPanel";
 import { TransferPanel } from "./components/Sidebar/TransferManager/TransferPanel";
+import { QuickInputPanel } from "./components/Sidebar/QuickInput/QuickInputPanel";
 import { useLayoutStore } from "./stores/layoutStore";
 import { useEditorStore } from "./stores/editorStore";
 import { useFileTreeStore } from "./stores/fileTreeStore";
@@ -24,6 +25,7 @@ export default function App() {
     isSidebarOpen,
     isTerminalOpen,
     activeSidebarTab,
+    toggleSidebarTab,
     initFromPreferences,
     resetLayout,
   } = useLayoutStore();
@@ -50,11 +52,18 @@ export default function App() {
       unlistenTerm = u;
     });
 
-    // Global keyboard shortcut for New Window: Ctrl+Shift+N (or Cmd+Shift+N)
+    // Global keyboard shortcuts:
+    // Ctrl+Shift+N (or Cmd+Shift+N) -> New Window
+    // Ctrl+Shift+K (or Cmd+Shift+K) -> Quick Inputs Panel
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "n" || e.key === "N")) {
-        e.preventDefault();
-        createNewWindow();
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+        if (e.key === "n" || e.key === "N") {
+          e.preventDefault();
+          createNewWindow();
+        } else if (e.key === "k" || e.key === "K") {
+          e.preventDefault();
+          toggleSidebarTab("snippets");
+        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -133,6 +142,7 @@ export default function App() {
                 />
               )}
               {activeSidebarTab === "servers" && <ServerManager />}
+              {activeSidebarTab === "snippets" && <QuickInputPanel />}
               {activeSidebarTab === "transfers" && <TransferPanel />}
               {activeSidebarTab === "settings" && (
                 <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-3 text-xs text-vscode-text">

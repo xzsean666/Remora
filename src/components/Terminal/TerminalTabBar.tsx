@@ -1,11 +1,19 @@
 import React from "react";
-import { Terminal, Plus, X, Globe, RotateCcw } from "lucide-react";
+import { Terminal, Plus, X, Globe, RotateCcw, Zap } from "lucide-react";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useLayoutStore } from "../../stores/layoutStore";
 
-export const TerminalTabBar: React.FC = () => {
+interface TerminalTabBarProps {
+  isQuickBarOpen?: boolean;
+  onToggleQuickBar?: () => void;
+}
+
+export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
+  isQuickBarOpen,
+  onToggleQuickBar,
+}) => {
   const {
     sessions,
     activeSessionId,
@@ -128,6 +136,20 @@ export const TerminalTabBar: React.FC = () => {
 
       {/* Right: Actions */}
       <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+        {onToggleQuickBar && (
+          <button
+            title={isQuickBarOpen ? "隐藏快捷命令条 (Hide Quick Bar)" : "显示快捷命令条 (Show Quick Bar)"}
+            onClick={onToggleQuickBar}
+            className={`p-1 rounded transition-colors flex items-center justify-center cursor-pointer ${
+              isQuickBarOpen
+                ? "text-amber-400 bg-vscode-hover"
+                : "text-vscode-textMuted hover:text-amber-300 hover:bg-vscode-hover"
+            }`}
+          >
+            <Zap className="w-3.5 h-3.5" />
+          </button>
+        )}
+
         <button
           title="New Terminal"
           onClick={handleCreateTerminal}

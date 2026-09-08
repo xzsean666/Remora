@@ -30,6 +30,7 @@ interface FileTreeState {
   loadingPaths: string[];
   dirErrors: Record<string, string>;
   dragOverPath: string | null;
+  deleteTarget: { path: string; name: string; isDir: boolean } | null;
 
   setRoot: (serverId: string, rootPath: string, serverName?: string) => Promise<void>;
   switchServer: (serverId: string | null) => Promise<void>;
@@ -41,12 +42,15 @@ interface FileTreeState {
   collapseAll: () => void;
   setSelectedPath: (path: string | null) => void;
   setDragOverPath: (path: string | null) => void;
+  requestDelete: (path: string, name: string, isDir: boolean) => void;
+  cancelDelete: () => void;
+  confirmDelete: (permanent: boolean) => Promise<void>;
   checkFileExists: (serverId: string, remotePath: string) => Promise<boolean>;
   moveItem: (oldPath: string, targetDir: string, newName?: string, overwrite?: boolean) => Promise<void>;
   createFile: (parentPath: string, name: string) => Promise<void>;
   createDir: (parentPath: string, name: string) => Promise<void>;
   renameItem: (oldPath: string, newName: string) => Promise<void>;
-  deleteItem: (path: string, isDir: boolean) => Promise<void>;
+  deleteItem: (path: string, isDir: boolean, permanent?: boolean) => Promise<void>;
   refreshPath: (path: string) => Promise<void>;
 }
 
@@ -61,6 +65,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   loadingPaths: [],
   dirErrors: {},
   dragOverPath: null,
+  deleteTarget: null,
 
   loadRecentProjects: async () => {
     try {
@@ -348,7 +353,23 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     await get().loadDirectory(parentPath);
   },
 
-  deleteItem: async (path: string, isDir: boolean) => {
+  requestDelete: (path: string, name: string, isDir: boolean) => {
+    set({ deleteTarget: { path, name, isDir } });
+  },
+
+  cancelDelete: () => {
+    set({ deleteTarget: null });
+  },
+
+  confirmDelete: async (permanent: boolean) => {
+    const { deleteTarget, deleteItem } = get();
+    if (!deleteTarget) return;
+    const { path, isDir } = deleteTarget;
+    set({ deleteTarget: null });
+    await deleteItem(path, isDir, permanent);
+  },
+
+  deleteItem: async (path: string, isDir: boolean, permanent = false) => {
     const { currentServerId, rootPath, selectedPath } = get();
     if (!currentServerId) return;
 
@@ -356,11 +377,18 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     parts.pop();
     const parentPath = parts.join("/") || rootPath || "/";
 
-    await invoke("sftp_remove", {
-      serverId: currentServerId,
-      path,
-      isDir,
-    });
+    if (permanent) {
+      await invoke("sftp_remove", {
+        serverId: currentServerId,
+        path,
+        isDir,
+      });
+    } else {
+      await invoke("sftp_trash", {
+        serverId: currentServerId,
+        path,
+      });
+    }
 
     if (selectedPath === path) {
       set({ selectedPath: null });

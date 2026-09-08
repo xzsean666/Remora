@@ -31,7 +31,7 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
     createFile,
     createDir,
     renameItem,
-    deleteItem,
+    requestDelete,
     refreshPath,
     currentServerId,
   } = useFileTreeStore();
@@ -250,7 +250,7 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
           onNewFile={entry.is_dir ? () => setCreatingType("file") : undefined}
           onNewFolder={entry.is_dir ? () => setCreatingType("dir") : undefined}
           onRename={() => setIsRenaming(true)}
-          onDelete={() => deleteItem(entry.path, entry.is_dir)}
+          onDelete={() => requestDelete(entry.path, entry.name, entry.is_dir)}
           onRefresh={entry.is_dir ? () => refreshPath(entry.path) : undefined}
           onCopyPath={() => navigator.clipboard.writeText(entry.path)}
           onDownload={

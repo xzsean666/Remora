@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager, State};
 use crate::connection::{ConnectionManager, ConnectionState};
 use crate::core::{
-    AppError, FileEntry, LayoutPreferences, ReadFileResult, RecentProject, Result,
+    AppError, FileEntry, LayoutPreferences, QuickSnippet, ReadFileResult, RecentProject, Result,
     ServerConfig, WriteFileResult,
 };
 use crate::security::KeyringService;
@@ -96,6 +96,49 @@ fn set_layout_preferences(
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
     state.storage.set_layout_preferences(&prefs)
+}
+
+// --- Quick Snippets Commands ---
+
+#[tauri::command]
+fn get_quick_snippets(state: State<'_, Arc<AppState>>) -> Result<Vec<QuickSnippet>> {
+    state.storage.get_quick_snippets()
+}
+
+#[tauri::command]
+fn save_quick_snippet(
+    snippet: QuickSnippet,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    state.storage.save_quick_snippet(&snippet)
+}
+
+#[tauri::command]
+fn delete_quick_snippet(id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
+    state.storage.delete_quick_snippet(&id)
+}
+
+#[tauri::command]
+fn delete_quick_snippet_group(group_name: String, state: State<'_, Arc<AppState>>) -> Result<()> {
+    state.storage.delete_quick_snippet_group(&group_name)
+}
+
+#[tauri::command]
+fn rename_quick_snippet_group(
+    old_name: String,
+    new_name: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    state.storage.rename_quick_snippet_group(&old_name, &new_name)
+}
+
+#[tauri::command]
+fn import_quick_snippets(
+    snippets: Vec<QuickSnippet>,
+    overwrite: bool,
+    state: State<'_, Arc<AppState>>,
+) -> Result<usize> {
+    state.storage.import_quick_snippets(&snippets, overwrite)
 }
 
 // --- Connection Commands ---
@@ -237,6 +280,15 @@ async fn sftp_remove(
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
     state.sftp.remove(&server_id, &path, is_dir).await
+}
+
+#[tauri::command]
+async fn sftp_trash(
+    server_id: String,
+    path: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<String> {
+    state.sftp.trash(&server_id, &path).await
 }
 
 #[tauri::command]
@@ -499,6 +551,7 @@ pub fn run() {
             sftp_create_dir,
             sftp_rename,
             sftp_remove,
+            sftp_trash,
             sftp_stat,
             terminal_open,
             terminal_write,
@@ -507,7 +560,13 @@ pub fn run() {
             transfer_upload,
             transfer_download,
             transfer_cancel,
-            transfer_list
+            transfer_list,
+            get_quick_snippets,
+            save_quick_snippet,
+            delete_quick_snippet,
+            delete_quick_snippet_group,
+            rename_quick_snippet_group,
+            import_quick_snippets
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

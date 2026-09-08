@@ -1,7 +1,10 @@
 import React from "react";
-import { Terminal, Wifi, WifiOff, Folder, RefreshCw, AlertCircle } from "lucide-react";
+import { Terminal, Wifi, WifiOff, Folder, RefreshCw, AlertCircle, Code2 } from "lucide-react";
 import { useLayoutStore } from "../../stores/layoutStore";
 import { useConnectionStore } from "../../stores/connectionStore";
+import { useEditorStore } from "../../stores/editorStore";
+import { languages } from "@codemirror/language-data";
+import { LanguageDescription } from "@codemirror/language";
 
 interface StatusBarProps {
   activePath?: string;
@@ -17,6 +20,10 @@ export const StatusBar: React.FC<StatusBarProps> = ({ activePath }) => {
     reconnect,
     getConnectedServerIds,
   } = useConnectionStore();
+  const { tabs, activeTabPath } = useEditorStore();
+  const activeTab = tabs.find((t) => t.path === activeTabPath);
+  const langDesc = activeTab ? LanguageDescription.matchFilename(languages, activeTab.path) : null;
+  const languageName = langDesc ? langDesc.name : (activeTab ? "Plain Text" : null);
 
   const connectedIds = getConnectedServerIds();
 
@@ -135,6 +142,17 @@ export const StatusBar: React.FC<StatusBarProps> = ({ activePath }) => {
           <Terminal className="w-3.5 h-3.5 flex-shrink-0" />
           <span>{isTerminalOpen ? "Hide Terminal" : "Terminal"}</span>
         </button>
+
+        {/* Active File Language Indicator */}
+        {languageName && (
+          <div
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-white/10 transition-colors text-vscode-textBright font-mono text-[11px] cursor-default"
+            title={`Syntax: ${languageName}`}
+          >
+            <Code2 className="w-3 h-3 opacity-70" />
+            <span>{languageName}</span>
+          </div>
+        )}
 
         <span className="hidden sm:inline">UTF-8</span>
         <span className="hidden sm:inline">LF</span>

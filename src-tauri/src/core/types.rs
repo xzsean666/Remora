@@ -93,3 +93,17 @@ pub struct WriteFileResult {
     pub success: bool,
     pub new_mtime: u64,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QuickSnippet {
+    pub id: String,
+    pub title: String,
+    pub command: String,
+    pub group_name: String,
+    pub auto_execute: bool,
+    pub description: Option<String>,
+    pub sort_order: i32,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+

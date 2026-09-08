@@ -30,6 +30,7 @@ import { safeInvoke as invoke, isRunningInTauri } from "../../../utils/tauriBrid
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useTransferStore } from "../../../stores/transferStore";
 import { FileConflictModal, FileConflictItem } from "./FileConflictModal";
+import { DeleteConfirmModal } from "./DeleteConfirmModal";
 
 function formatTimeAgo(timestamp: number): string {
   if (!timestamp) return "";
@@ -68,6 +69,9 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
     setDragOverPath,
     checkFileExists,
     moveItem,
+    deleteTarget,
+    confirmDelete,
+    cancelDelete,
   } = useFileTreeStore();
 
   const { uploadFile } = useTransferStore();
@@ -1066,6 +1070,15 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
           onRename={handleConflictRename}
           onCancel={handleConflictCancel}
           onReplaceAll={conflicts.length > 1 ? handleConflictReplaceAll : undefined}
+        />
+      )}
+
+      {/* Delete Confirmation Modal with Trash / Permanent Options */}
+      {deleteTarget && (
+        <DeleteConfirmModal
+          target={deleteTarget}
+          onConfirm={(permanent) => confirmDelete(permanent)}
+          onCancel={cancelDelete}
         />
       )}
     </div>

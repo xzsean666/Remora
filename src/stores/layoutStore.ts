@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { safeInvoke as invoke } from "../utils/tauriBridge";
 
-export type SidebarTab = "explorer" | "servers" | "transfers" | "settings";
+export type SidebarTab = "explorer" | "servers" | "snippets" | "transfers" | "settings";
 
 interface LayoutPreferences {
   sidebar_width?: number;

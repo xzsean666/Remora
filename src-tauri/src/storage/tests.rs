@@ -129,4 +129,127 @@ mod tests {
         let secret_after = keyring.get_secret("srv-1").unwrap();
         assert_eq!(secret_after, None);
     }
+
+    #[test]
+    fn test_quick_snippets_crud_and_groups() {
+        let storage = StorageService::new_in_memory().expect("failed to init db");
+
+        // 1. Verify default seed snippets are auto populated
+        let initial_snippets = storage.get_quick_snippets().expect("failed to get snippets");
+        assert_eq!(initial_snippets.len(), 12);
+
+        // 2. Add custom snippet
+        let custom_snippet = crate::core::QuickSnippet {
+            id: "custom-1".to_string(),
+            title: "Build Production".to_string(),
+            command: "cargo build --release".to_string(),
+            group_name: "Build".to_string(),
+            auto_execute: true,
+            description: Some("Compile release binary".to_string()),
+            sort_order: 1,
+            created_at: 1000,
+            updated_at: 1000,
+        };
+        storage.save_quick_snippet(&custom_snippet).expect("failed to save snippet");
+
+        let snippets_after_add = storage.get_quick_snippets().unwrap();
+        assert_eq!(snippets_after_add.len(), 13);
+        let found = snippets_after_add.iter().find(|s| s.id == "custom-1").unwrap();
+        assert_eq!(found.title, "Build Production");
+        assert_eq!(found.command, "cargo build --release");
+        assert_eq!(found.group_name, "Build");
+        assert!(found.auto_execute);
+
+        // 3. Update snippet
+        let mut updated = custom_snippet.clone();
+        updated.command = "cargo build --release -v".to_string();
+        updated.auto_execute = false;
+        updated.updated_at = 2000;
+        storage.save_quick_snippet(&updated).expect("failed to update snippet");
+
+        let snippets_after_update = storage.get_quick_snippets().unwrap();
+        let updated_found = snippets_after_update.iter().find(|s| s.id == "custom-1").unwrap();
+        assert_eq!(updated_found.command, "cargo build --release -v");
+        assert!(!updated_found.auto_execute);
+
+        // 4. Rename group
+        storage.rename_quick_snippet_group("Build", "CI/CD").expect("failed to rename group");
+        let snippets_after_rename = storage.get_quick_snippets().unwrap();
+        let renamed_found = snippets_after_rename.iter().find(|s| s.id == "custom-1").unwrap();
+        assert_eq!(renamed_found.group_name, "CI/CD");
+
+        // 5. Delete individual snippet
+        storage.delete_quick_snippet("custom-1").expect("failed to delete snippet");
+        let snippets_after_del = storage.get_quick_snippets().unwrap();
+        assert_eq!(snippets_after_del.len(), 12);
+        assert!(snippets_after_del.iter().all(|s| s.id != "custom-1"));
+
+        // 6. Delete group
+        storage.delete_quick_snippet_group("System").expect("failed to delete group");
+        let snippets_after_grp_del = storage.get_quick_snippets().unwrap();
+        assert!(snippets_after_grp_del.iter().all(|s| s.group_name != "System"));
+        assert_eq!(snippets_after_grp_del.len(), 8); // 12 - 4 System snippets
+    }
+
+    #[test]
+    fn test_quick_snippets_batch_import() {
+        let storage = StorageService::new_in_memory().expect("failed to init db");
+
+        let batch = vec![
+            crate::core::QuickSnippet {
+                id: "import-1".to_string(),
+                title: "K8s Pods".to_string(),
+                command: "kubectl get pods -A".to_string(),
+                group_name: "Kubernetes".to_string(),
+                auto_execute: true,
+                description: Some("List all pods across namespaces".to_string()),
+                sort_order: 1,
+                created_at: 1000,
+                updated_at: 1000,
+            },
+            crate::core::QuickSnippet {
+                id: "import-2".to_string(),
+                title: "K8s Nodes".to_string(),
+                command: "kubectl get nodes -o wide".to_string(),
+                group_name: "Kubernetes".to_string(),
+                auto_execute: true,
+                description: None,
+                sort_order: 2,
+                created_at: 1000,
+                updated_at: 1000,
+            },
+        ];
+
+        // 1. Merge Import (overwrite = false)
+        let count = storage.import_quick_snippets(&batch, false).expect("import failed");
+        assert_eq!(count, 2);
+
+        let list = storage.get_quick_snippets().unwrap();
+        assert_eq!(list.len(), 14); // 12 defaults + 2 imported
+        assert!(list.iter().any(|s| s.id == "import-1"));
+        assert!(list.iter().any(|s| s.id == "import-2"));
+
+        // 2. Overwrite Import (overwrite = true)
+        let single_item = vec![
+            crate::core::QuickSnippet {
+                id: "clean-1".to_string(),
+                title: "Echo Hello".to_string(),
+                command: "echo hello".to_string(),
+                group_name: "Testing".to_string(),
+                auto_execute: false,
+                description: None,
+                sort_order: 0,
+                created_at: 2000,
+                updated_at: 2000,
+            },
+        ];
+        let overwrite_count = storage.import_quick_snippets(&single_item, true).expect("overwrite failed");
+        assert_eq!(overwrite_count, 1);
+
+        let list_after_overwrite = storage.get_quick_snippets().unwrap();
+        assert_eq!(list_after_overwrite.len(), 1);
+        assert_eq!(list_after_overwrite[0].id, "clean-1");
+        assert_eq!(list_after_overwrite[0].title, "Echo Hello");
+    }
 }
+

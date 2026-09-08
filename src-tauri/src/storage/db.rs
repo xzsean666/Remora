@@ -1,7 +1,9 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use crate::core::{AppError, AuthType, LayoutPreferences, RecentProject, Result, ServerConfig};
+use crate::core::{
+    AppError, AuthType, LayoutPreferences, QuickSnippet, RecentProject, Result, ServerConfig,
+};
 
 pub struct StorageService {
     conn: Mutex<Connection>,
@@ -73,12 +75,60 @@ impl StorageService {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS quick_snippets (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                command TEXT NOT NULL,
+                group_name TEXT NOT NULL,
+                auto_execute INTEGER NOT NULL DEFAULT 1,
+                description TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
             "#,
         )?;
 
         // Graceful migration for existing databases without proxy columns
         let _ = conn.execute("ALTER TABLE servers ADD COLUMN remote_proxy TEXT", []);
         let _ = conn.execute("ALTER TABLE servers ADD COLUMN remote_no_proxy TEXT", []);
+
+        // Seed default quick snippets if the table is empty
+        let snippet_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM quick_snippets", [], |row| row.get(0))
+            .unwrap_or(0);
+        if snippet_count == 0 {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64;
+            let defaults: [(&str, &str, &str, &str, i32, &str, i32); 12] = [
+                // Group: System
+                ("default-sys-1", "System Info", "uname -a", "System", 1, "Print detailed kernel and OS information", 1),
+                ("default-sys-2", "Disk Usage", "df -h", "System", 1, "Show disk space usage in human-readable units", 2),
+                ("default-sys-3", "Memory Usage", "free -h", "System", 1, "Display free and used RAM/Swap", 3),
+                ("default-sys-4", "Top Processes", "top", "System", 1, "Monitor active processes and resource load", 4),
+                // Group: Docker
+                ("default-dock-1", "Docker PS", "docker ps -a", "Docker", 1, "List all running and exited containers", 1),
+                ("default-dock-2", "Docker Images", "docker images", "Docker", 1, "List all local container images", 2),
+                ("default-dock-3", "Docker Stats", "docker stats --no-stream", "Docker", 1, "One-shot snapshot of container memory/CPU consumption", 3),
+                ("default-dock-4", "Compose Status", "docker compose ps", "Docker", 1, "List containers in current docker compose stack", 4),
+                // Group: Network
+                ("default-net-1", "Listening Ports", "ss -tulnp", "Network", 1, "Show listening TCP/UDP ports with corresponding processes", 1),
+                ("default-net-2", "Public IP", "curl -s ifconfig.me && echo", "Network", 1, "Query public IP address", 2),
+                // Group: Git
+                ("default-git-1", "Git Status", "git status", "Git", 1, "Check workspace dirty state and staged files", 1),
+                ("default-git-2", "Recent Commits", "git log --oneline -n 10", "Git", 1, "Display recent 10 commits concisely", 2),
+            ];
+            for (id, title, cmd, grp, auto_exec, desc, sort) in defaults {
+                let _ = conn.execute(
+                    r#"INSERT OR IGNORE INTO quick_snippets (id, title, command, group_name, auto_execute, description, sort_order, created_at, updated_at)
+                       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"#,
+                    params![id, title, cmd, grp, auto_exec, desc, sort, now, now],
+                );
+            }
+        }
 
         Ok(())
     }
@@ -280,4 +330,133 @@ impl StorageService {
         let json_str = serde_json::to_string(prefs).map_err(|e| AppError::Storage(e.to_string()))?;
         self.set_preference("layout_preferences", &json_str)
     }
+
+    // --- Quick Snippets CRUD ---
+
+    pub fn get_quick_snippets(&self) -> Result<Vec<QuickSnippet>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, title, command, group_name, auto_execute, description, sort_order, created_at, updated_at
+             FROM quick_snippets ORDER BY group_name ASC, sort_order ASC, created_at ASC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            let auto_execute_int: i32 = row.get(4)?;
+            Ok(QuickSnippet {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                command: row.get(2)?,
+                group_name: row.get(3)?,
+                auto_execute: auto_execute_int != 0,
+                description: row.get(5)?,
+                sort_order: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        })?;
+
+        let mut snippets = Vec::new();
+        for row in rows {
+            snippets.push(row?);
+        }
+        Ok(snippets)
+    }
+
+    pub fn save_quick_snippet(&self, snippet: &QuickSnippet) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO quick_snippets (id, title, command, group_name, auto_execute, description, sort_order, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ON CONFLICT(id) DO UPDATE SET
+                title = excluded.title,
+                command = excluded.command,
+                group_name = excluded.group_name,
+                auto_execute = excluded.auto_execute,
+                description = excluded.description,
+                sort_order = excluded.sort_order,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                snippet.id,
+                snippet.title,
+                snippet.command,
+                snippet.group_name,
+                if snippet.auto_execute { 1 } else { 0 },
+                snippet.description,
+                snippet.sort_order,
+                snippet.created_at,
+                snippet.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_quick_snippet(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM quick_snippets WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn delete_quick_snippet_group(&self, group_name: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM quick_snippets WHERE group_name = ?1",
+            params![group_name],
+        )?;
+        Ok(())
+    }
+
+    pub fn rename_quick_snippet_group(&self, old_name: &str, new_name: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        conn.execute(
+            "UPDATE quick_snippets SET group_name = ?1, updated_at = ?2 WHERE group_name = ?3",
+            params![new_name, now, old_name],
+        )?;
+        Ok(())
+    }
+
+    pub fn import_quick_snippets(&self, snippets: &[QuickSnippet], overwrite: bool) -> Result<usize> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        if overwrite {
+            tx.execute("DELETE FROM quick_snippets", [])?;
+        }
+        let mut count = 0;
+        for snippet in snippets {
+            tx.execute(
+                r#"
+                INSERT INTO quick_snippets (id, title, command, group_name, auto_execute, description, sort_order, created_at, updated_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                ON CONFLICT(id) DO UPDATE SET
+                    title = excluded.title,
+                    command = excluded.command,
+                    group_name = excluded.group_name,
+                    auto_execute = excluded.auto_execute,
+                    description = excluded.description,
+                    sort_order = excluded.sort_order,
+                    updated_at = excluded.updated_at
+                "#,
+                params![
+                    snippet.id,
+                    snippet.title,
+                    snippet.command,
+                    snippet.group_name,
+                    if snippet.auto_execute { 1 } else { 0 },
+                    snippet.description,
+                    snippet.sort_order,
+                    snippet.created_at,
+                    snippet.updated_at,
+                ],
+            )?;
+            count += 1;
+        }
+        tx.commit()?;
+        Ok(count)
+    }
 }
+
