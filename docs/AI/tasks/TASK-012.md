@@ -48,4 +48,10 @@ cargo build --release --manifest-path src-tauri/Cargo.toml
 - 风险: Release 编译时间较长；采用分步执行并保留增量缓存。
 
 ## Status
-IN_PROGRESS
+DONE
+
+## Verification Results
+- `cargo test --manifest-path src-tauri/Cargo.toml`: 13 passed (12 unit tests + 1 e2e integration test), 0 failed.
+- `pnpm run build`: Succeeded with code 0 without any type or bundling errors.
+- `cargo build --release --manifest-path src-tauri/Cargo.toml`: Succeeded with code 0; produced optimized release binary `src-tauri/target/release/remora` (21MB).
+- All acceptance criteria satisfied across all modules.
