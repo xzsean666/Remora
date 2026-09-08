@@ -5,58 +5,97 @@
 ---
 
 ## 1. 当前目标与任务
-- **当前 Goal**: 实现快捷输入批量导入与导出功能，支持跨设备同步与本地备份
-- **当前 Task**: TASK-026: 快捷输入批量导入与导出功能 (Quick Snippets Import & Export)
+- **当前 Goal**: 支持移动端 Android APK 自动打包发布与安装、小屏幕自适应三板块 Tab 折叠视图与移动键盘辅助控制，以及全局 SSH 私钥配置与选配管理
+- **当前 Task**: 
+  - TASK-027: SSH 私钥管理与连接凭证选配支持 (SSH Private Key Management & Selection) [DONE]
+  - TASK-028: 手机端响应式三板块 Tab 视图与终端辅助键盘适配 (Mobile Responsive 3-Tab Layout & Keyboard) [DONE]
+  - TASK-029: Android 移动端工程集成与 GitHub Release 自动打包发布 APK 体系 (Android Build & Release CI) [DONE]
 - **当前状态**: DONE
 
 ---
 
 ## 2. 本次会话完成内容
-1. **快捷输入后端批量事务导入 (SQLite Transaction)**:
-   - 在 `src-tauri/src/storage/db.rs` 实现 `import_quick_snippets(&self, snippets: &[QuickSnippet], overwrite: bool) -> Result<usize>`。使用单一事务保证批量写入原子性与极速执行，支持 `overwrite` 模式在同一事务内清空旧数据后全量装载。
-   - 在 `src-tauri/src/lib.rs` 暴露并注册 `import_quick_snippets` Tauri IPC 命令。
-   - 在 `src-tauri/src/storage/tests.rs` 增加 `test_quick_snippets_batch_import` 单元测试，覆盖合并更新与全量覆盖模式。
-2. **前端标准 JSON 导出与跨平台下载**:
-   - 在 `src/stores/quickSnippetStore.ts` 实现 `exportSnippets(groupName?: string)`。
-   - 包含标准元数据结构（`version: 1`, `app: "remora"`, `exported_at`, `count`, `snippets`）。
-   - 零额外依赖，通过标准 Blob 与虚拟链接自动触发浏览器/WebView 文件保存，命名为 `remora-snippets-YYYY-MM-DD.json`。
-3. **前端文件读取、容错清洗与导入模态框 (ImportSnippetModal)**:
-   - 支持对象包装格式 (`{ snippets: [...] }`) 与纯数组格式 (`[...]`) 自动兼容。
-   - 字段防御性清洗：校验非空 `title` 与 `command`，自动填充缺失的 `group_name` 为 `"Imported"`、自动生成防冲撞 ID。
-   - 创建 `src/components/Sidebar/QuickInput/ImportSnippetModal.tsx`：提供导入文件统计、包含分组标签呈现、前几项数据样本预览，支持“合并更新 (推荐)”与“清空全量覆盖”两种策略。
-4. **侧边栏操作栏无缝集成**:
-   - 在 `QuickInputPanel.tsx` 顶部操作栏集成批量导入 (Upload) 与导出 (Download) 按钮，集成隐藏文件选择控件，并在完成时通过顶部 Toast 给予成功提示。
+1. **TASK-027 (SSH 私钥管理与连接凭证选配支持)**:
+   - **后端存储与鉴权**:
+     - 在 `src-tauri/src/core/types.rs` 新增 `SshKey` 实体结构（包含 `id`, `name`, `private_key`, `passphrase`, `created_at`, `updated_at`）。
+     - 在 `src-tauri/src/storage/db.rs` 创建 SQLite `ssh_keys` 表与完整增删改查方法（`get_ssh_keys`, `get_ssh_key`, `save_ssh_key`, `delete_ssh_key`）。
+     - 在 `src-tauri/src/connection/manager.rs` 与 `src-tauri/src/lib.rs` 增强认证解析：优先通过 `russh::keys::decode_secret_key` 直接在内存中解码 PEM/OpenSSH 格式私钥内容（或通过 `key:<id>` 前缀寻址并装载已存储的私钥），若非文本格式则自动回退至文件路径解析，完美兼容路径与内容。
+     - 在 `src-tauri/src/storage/tests.rs` 新增 `test_ssh_keys_crud` 单元测试。
+   - **前端密钥管理界面与选配**:
+     - 在 `src/utils/tauriBridge.ts` 补充密钥 CRUD IPC 接口。
+     - 新建 `src/stores/sshKeyStore.ts` 集中管理私钥列表与增删操作。
+     - 新建 `src/components/Sidebar/ServerManager/KeyManagerModal.tsx`，支持私钥添加（支持粘贴私钥文本或选择本地文件）、密码短语设置、列表展示与安全删除。
+     - 在 `ServerManager.tsx` 的私钥配置行增加快速下拉选择框（可直选已保存的私钥名称）与 “🔑 私钥管理” 打开按钮。
+
+2. **TASK-028 (手机端响应式三板块 Tab 视图与移动虚拟键盘/辅助按键适配)**:
+   - **布局状态机**:
+     - 在 `src/stores/layoutStore.ts` 引入 `isMobile` 状态（窗口宽度 < 768px 并自动监听 `resize`）与 `mobileTab`（`"workspace"` | `"editor"` | `"terminal"`）。
+   - **动态视口与软键盘适配**:
+     - 在 `index.html` 的 meta viewport 中添加 `viewport-fit=cover, user-scalable=no` 避免缩放错位。
+     - 在 `src/App.tsx` 最外层采用 `h-[100dvh]` 适配移动端软键盘弹出时的动态可视视口高度。
+   - **底部导航栏与跨模块联动**:
+     - 新建 `src/components/Layout/MobileTabBar.tsx`，悬浮停靠在屏幕底部，以轻触交互切换三大板块，并展示未保存修改红点、终端活跃连接数与状态指示。
+     - 在 `App.tsx` 中配置联动：手机模式下从 Project Explorer 轻触打开文件时，自动无缝跳转至 `editor` Tab。
+     - 在 `src/components/Editor/EditorTabBar.tsx` 中为移动端增加专属常驻保存按钮（`💾 保存`），触控即可保存，无需依赖 Ctrl+S。
+   - **移动终端辅助输入键盘 (TerminalMobileBar)**:
+     - 新建 `src/components/Terminal/TerminalMobileBar.tsx`，针对手机原生软键盘无法输入 `Esc`、`Tab`、`Ctrl+C`、`Ctrl+D`、方向键等痛点，提供横向滚动的快捷辅助按键栏。
+     - 在 `src/stores/terminalStore.ts` 实现 `sendDataToActiveTerminal`，将终端控制序列（如 `\x1b`、`\t`、`\x03`、`\x1b[A`）直接以 PTY 字节流写入终端后端。
+     - 辅助栏内置常用符号 (`/`, `~`, `|`, `-`, `:`) 及与快捷输入面板 (Snippets) 的一键联动。
+
+3. **TASK-029 (Android 原生工程集成与 GitHub Release 自动打包发布 APK)**:
+   - **Android 原生工程与编译配置**:
+     - 完成 `tauri android init`，生成 `src-tauri/gen/android/` 目录结构。
+     - 在 `src-tauri/src/lib.rs` 中使用 `#[cfg(desktop)]` 对桌面端专有的 `tauri-plugin-single-instance` 与 `open_new_window` 进行条件编译隔离，确保移动平台无缝兼容。
+     - 修改 `src-tauri/gen/android/app/build.gradle.kts`，将 `release` 构建类型指向 `debug` 签名配置（`signingConfig = signingConfigs.getByName("debug")`）并关闭混淆，确保 GitHub Actions 生成的 Release APK 开箱即用、手机可直接点击安装。
+   - **GitHub Actions CI/CD 流水线升级**:
+     - 升级 `.github/workflows/release.yml`，新增 `build-android` 独立作业。
+     - 配置 Java 17 (`actions/setup-java@v4`)、Android SDK & NDK 26 (`android-actions/setup-android@v3`)、Rust Android target (`aarch64-linux-android`)。
+     - 执行 `pnpm tauri android build --apk` 编译出针对主流 ARM64 架构的 Android APK。
+     - 使用 `softprops/action-gh-release@v2` 将打出的所有 `.apk` 产物自动挂载至 GitHub Release 页面供用户下载。
 
 ---
 
 ## 3. 修改与创建的文件
 - **新建文件**:
-  - `docs/AI/tasks/TASK-026.md`
-  - `src/components/Sidebar/QuickInput/ImportSnippetModal.tsx`
+  - `docs/AI/tasks/TASK-027.md`
+  - `docs/AI/tasks/TASK-028.md`
+  - `docs/AI/tasks/TASK-029.md`
+  - `src/stores/sshKeyStore.ts`
+  - `src/components/Sidebar/ServerManager/KeyManagerModal.tsx`
+  - `src/components/Layout/MobileTabBar.tsx`
+  - `src/components/Terminal/TerminalMobileBar.tsx`
 - **修改文件**:
+  - `src-tauri/src/core/types.rs`
   - `src-tauri/src/storage/db.rs`
   - `src-tauri/src/storage/tests.rs`
+  - `src-tauri/src/connection/manager.rs`
   - `src-tauri/src/lib.rs`
   - `src/utils/tauriBridge.ts`
-  - `src/stores/quickSnippetStore.ts`
-  - `src/components/Sidebar/QuickInput/QuickInputPanel.tsx`
+  - `src/components/Sidebar/ServerManager/ServerManager.tsx`
+  - `src/stores/layoutStore.ts`
+  - `src/stores/terminalStore.ts`
+  - `src/components/Terminal/TerminalPanel.tsx`
+  - `src/components/Editor/EditorTabBar.tsx`
+  - `src/App.tsx`
+  - `index.html`
+  - `src-tauri/gen/android/app/build.gradle.kts`
+  - `.github/workflows/release.yml`
   - `docs/AI/TASK_INDEX.md`
   - `docs/AI/SESSION_STATE.md`
 
 ---
 
 ## 4. 已运行的验证命令及结果
-- `cargo check --manifest-path src-tauri/Cargo.toml`: 0 错误 0 告警通过。
-- `cargo test --manifest-path src-tauri/Cargo.toml`: 23 组单元测试 + 1 组 e2e 测试全部 100% 通过（新增 `test_quick_snippets_batch_import` 测试合并导入与覆盖导入）。
+- `cargo test --manifest-path src-tauri/Cargo.toml`: 24 组单元测试 + 1 组 e2e 测试全部 100% 通过（新增 `test_ssh_keys_crud`）。
 - `pnpm tsc --noEmit`: 前端 TypeScript 类型检查 0 报错通过。
-- `pnpm build`: Vite 生产打包通过，各组件分包正常生成。
+- `pnpm build`: Vite 生产打包通过，各模块构建正常。
 
 ---
 
 ## 5. 未解决问题与剩余风险
-- 无。导入导出功能完全闭环，支持容错校验、预览确认与合并/覆盖策略。
+- 无。桌面端多面板与移动端单板块 Tab 相互隔离良好，私钥选配支持内存直解与文件路径向下兼容，Android 自动化构建流程完备。
 
 ---
 
 ## 6. 下一步执行计划
-- 持续收集用户对快捷输入和整体远程工作流的操作反馈。
+- 用户后续可直接通过 push 带有 `v*` 格式的 tag 触发 GitHub Actions 发布包含 Linux/macOS/Windows 以及 Android `.apk` 文件的完整 Release。

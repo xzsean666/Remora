@@ -251,5 +251,48 @@ mod tests {
         assert_eq!(list_after_overwrite[0].id, "clean-1");
         assert_eq!(list_after_overwrite[0].title, "Echo Hello");
     }
+
+    #[test]
+    fn test_ssh_keys_crud() {
+        let storage = StorageService::new_in_memory().expect("failed to init db");
+
+        // Initially empty
+        let keys = storage.get_ssh_keys().unwrap();
+        assert_eq!(keys.len(), 0);
+
+        // Save a key
+        let key = crate::core::SshKey {
+            id: "key-1".to_string(),
+            name: "My Server Key".to_string(),
+            private_key: "-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n-----END OPENSSH PRIVATE KEY-----".to_string(),
+            passphrase: Some("secret123".to_string()),
+            public_key: Some("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA test@remora".to_string()),
+            created_at: 1000,
+            updated_at: 1000,
+        };
+        storage.save_ssh_key(&key).unwrap();
+
+        let fetched = storage.get_ssh_key("key-1").unwrap().expect("key should exist");
+        assert_eq!(fetched.name, "My Server Key");
+        assert_eq!(fetched.passphrase, Some("secret123".to_string()));
+
+        let all_keys = storage.get_ssh_keys().unwrap();
+        assert_eq!(all_keys.len(), 1);
+
+        // Update key
+        let updated_key = crate::core::SshKey {
+            name: "Updated Server Key".to_string(),
+            ..key
+        };
+        storage.save_ssh_key(&updated_key).unwrap();
+        let fetched_updated = storage.get_ssh_key("key-1").unwrap().unwrap();
+        assert_eq!(fetched_updated.name, "Updated Server Key");
+
+        // Delete key
+        storage.delete_ssh_key("key-1").unwrap();
+        let after_delete = storage.get_ssh_key("key-1").unwrap();
+        assert_eq!(after_delete, None);
+    }
 }
+
 

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { safeInvoke as invoke } from "../utils/tauriBridge";
 
 export type SidebarTab = "explorer" | "servers" | "snippets" | "transfers" | "settings";
+export type MobileTab = "workspace" | "editor" | "terminal";
 
 interface LayoutPreferences {
   sidebar_width?: number;
@@ -17,6 +18,12 @@ interface LayoutState {
   isSidebarOpen: boolean;
   isTerminalOpen: boolean;
   activeSidebarTab: SidebarTab;
+
+  // Mobile responsive layout
+  isMobile: boolean;
+  mobileTab: MobileTab;
+  setIsMobile: (isMobile: boolean) => void;
+  setMobileTab: (tab: MobileTab) => void;
 
   setSidebarWidth: (width: number) => void;
   setTerminalHeight: (height: number) => void;
@@ -39,6 +46,11 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   isSidebarOpen: true,
   isTerminalOpen: true,
   activeSidebarTab: "explorer",
+
+  isMobile: typeof window !== "undefined" ? window.innerWidth < 768 : false,
+  mobileTab: "workspace",
+  setIsMobile: (isMobile: boolean) => set({ isMobile }),
+  setMobileTab: (tab: MobileTab) => set({ mobileTab: tab }),
 
   setSidebarWidth: (width: number) => {
     const maxWidth = typeof window !== "undefined" ? Math.max(260, Math.min(600, window.innerWidth - 300)) : 600;

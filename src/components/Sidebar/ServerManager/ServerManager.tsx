@@ -27,6 +27,8 @@ import { useConnectionStore } from "../../../stores/connectionStore";
 import { useLayoutStore } from "../../../stores/layoutStore";
 import { parseSshCommand } from "../../../utils/sshParser";
 import { OpenFolderModal } from "../ProjectExplorer/OpenFolderModal";
+import { KeyManagerModal } from "./KeyManagerModal";
+import { useSshKeyStore } from "../../../stores/sshKeyStore";
 
 export const DEFAULT_NO_PROXY =
   "localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,172.17.0.0/16,172.18.0.0/16,172.19.0.0/16,172.20.0.0/16,192.168.0.0/16,*.local,.internal,host.docker.internal";
@@ -50,8 +52,11 @@ export const ServerManager: React.FC = () => {
   const [servers, setServers] = useState<ServerConfig[]>([]);
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showKeyManagerModal, setShowKeyManagerModal] = useState(false);
   const [editingServerId, setEditingServerId] = useState<string | null>(null);
   const [openFolderServerId, setOpenFolderServerId] = useState<string | null>(null);
+
+  const { keys: sshKeys, loadKeys: loadSshKeys } = useSshKeyStore();
 
   // Form states
   const [name, setName] = useState("");
@@ -114,6 +119,7 @@ export const ServerManager: React.FC = () => {
 
   useEffect(() => {
     loadServers();
+    loadSshKeys();
   }, []);
 
   const handleParseCommand = (cmd: string) => {
@@ -238,37 +244,51 @@ export const ServerManager: React.FC = () => {
   const handleDisconnect = async (srvId: string) => {
     try {
       await invoke("disconnect_server", { serverId: srvId });
-      setServerState(srvId, "disconnected");
+      await syncConnectionStates();
+      if (activeServerId === srvId) {
+        setActiveServerId(null);
+      }
     } catch (err) {
-      console.error("Disconnect failed:", err);
+      console.error("Failed to disconnect from server:", err);
     }
   };
 
-  const handleActivate = async (srv: ServerConfig) => {
-    setActiveServerId(srv.id);
-    await switchServer(srv.id);
+  const handleActivate = (srv: ServerConfig) => {
+    switchServer(srv.id);
   };
 
-  const handleDelete = async (srvId: string) => {
-    if (confirm("Are you sure you want to delete this server?")) {
-      await invoke("delete_server", { id: srvId });
-      if (activeServerId === srvId) setActiveServerId(null);
-      await loadServers();
+  const handleDelete = async (id: string) => {
+    if (confirm("Are you sure you want to delete this server configuration?")) {
+      try {
+        await invoke("delete_server", { id });
+        await loadServers();
+      } catch (err) {
+        console.error("Failed to delete server:", err);
+      }
     }
   };
 
   return (
     <div className="flex flex-col h-full select-none text-xs">
-      {/* Header with Add Button */}
+      {/* Header with Add & Key Management Buttons */}
       <div className="h-7 px-3 bg-vscode-sidebar/90 border-b border-vscode-border/40 flex items-center justify-between font-bold text-[11px] text-vscode-textBright uppercase flex-shrink-0">
         <span className="truncate min-w-0 mr-1">Configured Servers ({servers.length})</span>
-        <button
-          onClick={() => setShowAddModal(true)}
-          title="Add New SSH Server"
-          className="p-1 hover:text-white hover:bg-vscode-hover rounded flex items-center gap-1 text-xs flex-shrink-0"
-        >
-          <Plus className="w-3.5 h-3.5" />
-        </button>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <button
+            onClick={() => setShowKeyManagerModal(true)}
+            title="Manage SSH Private Keys / 私钥管理"
+            className="p-1 text-vscode-textMuted hover:text-amber-400 hover:bg-vscode-hover rounded flex items-center gap-1 text-xs transition-colors"
+          >
+            <Key className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setShowAddModal(true)}
+            title="Add New SSH Server"
+            className="p-1 hover:text-white hover:bg-vscode-hover rounded flex items-center gap-1 text-xs transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Web Preview Mode notice if in browser */}
@@ -732,20 +752,68 @@ export const ServerManager: React.FC = () => {
                 )}
 
                 {authType === "private_key" && (
-                  <>
+                  <div className="p-3 bg-vscode-bg/40 border border-vscode-border rounded-lg flex flex-col gap-2.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] text-vscode-textMuted flex items-center gap-1">
+                        <Key className="w-3.5 h-3.5 text-amber-400" />
+                        <span className="font-medium text-vscode-textBright">Private Key / SSH 私钥</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setShowKeyManagerModal(true)}
+                        className="text-[11px] text-vscode-activityBarActive hover:underline flex items-center gap-1 font-medium cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Manage Keys / 管理私钥</span>
+                      </button>
+                    </div>
+
+                    {/* Saved Private Keys dropdown */}
+                    {sshKeys.length > 0 && (
+                      <div>
+                        <label className="text-[10px] text-vscode-textMuted block mb-1">
+                          Select Saved Key / 选择已保存私钥:
+                        </label>
+                        <select
+                          value={keyPath.startsWith("key:") ? keyPath.replace("key:", "") : ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val) {
+                              setKeyPath(`key:${val}`);
+                              const found = sshKeys.find((k) => k.id === val);
+                              if (found?.passphrase && !secret) {
+                                setSecret(found.passphrase);
+                              }
+                            } else {
+                              setKeyPath("");
+                            }
+                          }}
+                          className="w-full bg-vscode-bg border border-vscode-border rounded px-2.5 py-1.5 text-xs outline-none focus:border-vscode-activityBarActive transition-colors cursor-pointer font-mono"
+                        >
+                          <option value="">-- Choose from saved keys or enter path below --</option>
+                          {sshKeys.map((k) => (
+                            <option key={k.id} value={k.id}>
+                              🔑 {k.name} ({k.private_key.includes("OPENSSH") ? "OpenSSH" : k.private_key.includes("ED25519") ? "Ed25519" : "Key"})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     <div>
-                      <label className="text-[11px] text-vscode-textMuted block mb-1 flex items-center gap-1">
-                        <Key className="w-3 h-3 text-amber-400" /> Private Key Path
+                      <label className="text-[10px] text-vscode-textMuted block mb-1">
+                        File Path or Key ID / 本地路径或私钥标识:
                       </label>
                       <input
-                        placeholder="/home/user/.ssh/id_ed25519"
+                        placeholder="/home/user/.ssh/id_ed25519 or key:id"
                         value={keyPath}
                         onChange={(e) => setKeyPath(e.target.value)}
                         className="w-full bg-vscode-bg border border-vscode-border rounded px-2.5 py-1.5 text-xs outline-none focus:border-vscode-activityBarActive transition-colors font-mono"
                       />
                     </div>
+
                     <div>
-                      <label className="text-[11px] text-vscode-textMuted block mb-1">Passphrase (Optional)</label>
+                      <label className="text-[11px] text-vscode-textMuted block mb-1">Passphrase (Optional / 密码短语)</label>
                       <input
                         type="password"
                         placeholder={editingServerId ? "Leave blank to keep existing passphrase" : "Key Passphrase"}
@@ -754,7 +822,7 @@ export const ServerManager: React.FC = () => {
                         className="w-full bg-vscode-bg border border-vscode-border rounded px-2.5 py-1.5 text-xs outline-none focus:border-vscode-activityBarActive transition-colors"
                       />
                     </div>
-                  </>
+                  </div>
                 )}
 
                 <div>
@@ -885,6 +953,19 @@ export const ServerManager: React.FC = () => {
         isOpen={Boolean(openFolderServerId)}
         onClose={() => setOpenFolderServerId(null)}
         targetServerId={openFolderServerId}
+      />
+
+      <KeyManagerModal
+        isOpen={showKeyManagerModal}
+        onClose={() => setShowKeyManagerModal(false)}
+        onSelectKey={(keyId) => {
+          setKeyPath(`key:${keyId}`);
+          setAuthType("private_key");
+          const found = sshKeys.find((k) => k.id === keyId);
+          if (found?.passphrase) {
+            setSecret(found.passphrase);
+          }
+        }}
       />
     </div>
   );

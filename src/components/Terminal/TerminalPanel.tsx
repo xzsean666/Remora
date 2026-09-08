@@ -5,9 +5,12 @@ import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { TerminalTabBar } from "./TerminalTabBar";
 import { TerminalQuickBar } from "./TerminalQuickBar";
+import { TerminalMobileBar } from "./TerminalMobileBar";
 import { XtermView } from "./XtermView";
+import { useLayoutStore } from "../../stores/layoutStore";
 
 export const TerminalPanel: React.FC = () => {
+  const { isMobile } = useLayoutStore();
   const { sessions, activeSessionId, addSession } = useTerminalStore();
   const { currentServerId, rootPath } = useFileTreeStore();
   const { connectedServerProxy, activeServerId, connectedServerName } = useConnectionStore();
@@ -77,6 +80,11 @@ export const TerminalPanel: React.FC = () => {
           ))
         )}
       </div>
+
+      {/* Mobile Terminal Virtual Accessory Bar */}
+      {isMobile && sessions.length > 0 && (
+        <TerminalMobileBar onToggleSnippets={() => setIsQuickBarOpen(!isQuickBarOpen)} />
+      )}
     </div>
   );
 };

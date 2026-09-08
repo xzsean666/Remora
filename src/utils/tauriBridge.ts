@@ -13,6 +13,16 @@ export interface QuickSnippet {
   updated_at: number;
 }
 
+export interface SshKey {
+  id: string;
+  name: string;
+  private_key: string;
+  passphrase?: string | null;
+  public_key?: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
 /**
  * Checks if the current frontend is running inside the Tauri native desktop window.
  */
@@ -50,6 +60,25 @@ if (typeof window !== "undefined" && !(window as any).__TAURI_INTERNALS__) {
 
 const STORAGE_KEY_SERVERS = "remora_mock_servers";
 const STORAGE_KEY_SNIPPETS = "remora_mock_quick_snippets";
+const STORAGE_KEY_SSH_KEYS = "remora_mock_ssh_keys";
+
+function getMockSshKeys(): SshKey[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_SSH_KEYS);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.warn("Failed to read mock ssh keys from localStorage:", e);
+  }
+  return [];
+}
+
+function saveMockSshKeys(keys: SshKey[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY_SSH_KEYS, JSON.stringify(keys));
+  } catch (e) {
+    console.warn("Failed to write mock ssh keys to localStorage:", e);
+  }
+}
 
 const DEFAULT_MOCK_SNIPPETS: QuickSnippet[] = [
   { id: "default-sys-1", title: "System Info", command: "uname -a", group_name: "System", auto_execute: true, description: "Print detailed kernel and OS information", sort_order: 1, created_at: Date.now(), updated_at: Date.now() },
@@ -418,6 +447,36 @@ export async function safeInvoke<T = any>(cmd: string, args?: Record<string, any
       saveMockSnippets(existing);
       return snippets.length as unknown as T;
     }
+    case "get_ssh_keys": {
+      return getMockSshKeys() as unknown as T;
+    }
+    case "get_ssh_key": {
+      const id = args?.id as string;
+      const key = getMockSshKeys().find((k) => k.id === id) || null;
+      return key as unknown as T;
+    }
+    case "save_ssh_key": {
+      const key = args?.key as SshKey;
+      if (key) {
+        const keys = getMockSshKeys();
+        const idx = keys.findIndex((k) => k.id === key.id);
+        if (idx !== -1) {
+          keys[idx] = key;
+        } else {
+          keys.push(key);
+        }
+        saveMockSshKeys(keys);
+      }
+      return undefined as unknown as T;
+    }
+    case "delete_ssh_key": {
+      const id = args?.id as string;
+      if (id) {
+        const keys = getMockSshKeys().filter((k) => k.id !== id);
+        saveMockSshKeys(keys);
+      }
+      return undefined as unknown as T;
+    }
     default: {
       throw new Error(
         `Command "${cmd}" requires Tauri desktop runtime. Please run Remora with "pnpm tauri dev".`
@@ -469,5 +528,22 @@ export async function renameQuickSnippetGroup(oldName: string, newName: string):
 export async function importQuickSnippets(snippets: QuickSnippet[], overwrite: boolean = false): Promise<number> {
   return await safeInvoke<number>("import_quick_snippets", { snippets, overwrite });
 }
+
+export async function getSshKeys(): Promise<SshKey[]> {
+  return await safeInvoke<SshKey[]>("get_ssh_keys");
+}
+
+export async function getSshKey(id: string): Promise<SshKey | null> {
+  return await safeInvoke<SshKey | null>("get_ssh_key", { id });
+}
+
+export async function saveSshKey(key: SshKey): Promise<void> {
+  await safeInvoke("save_ssh_key", { key });
+}
+
+export async function deleteSshKey(id: string): Promise<void> {
+  await safeInvoke("delete_ssh_key", { id });
+}
+
 
 

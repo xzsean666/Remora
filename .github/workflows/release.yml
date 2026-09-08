@@ -65,18 +65,87 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'Remora ${{ github.ref_name }}'
           releaseBody: |
-            See the assets below to download and install Remora on Ubuntu/Linux.
+            See the assets below to download and install Remora on Ubuntu/Linux and Android mobile devices.
             
-            ### Installation on Ubuntu / Debian:
+            ### Desktop Installation on Ubuntu / Debian:
             ```bash
             sudo dpkg -i remora_*_amd64.deb
             # or
             sudo apt install ./remora_*_amd64.deb
             ```
             
-            ### Right-Click New Window:
+            ### Mobile Android Installation (手机端安装):
+            Download the Android APK file (`app-universal-release.apk` or `app-arm64-v8a-release.apk`) directly to your phone and tap to install.
+            
+            ### Right-Click New Window (Desktop):
             Once installed, right-click the Remora icon in the Ubuntu Dock to open a **New Window**.
-            Inside the app, press `Ctrl+Shift+N` to open a new window at any time.
+            Inside the desktop app, press `Ctrl+Shift+N` to open a new window at any time.
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+  build-android:
+    needs: build-and-release
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: |
+          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.1.10909125"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Build Android APK
+        run: |
+          pnpm tauri android build --apk
+
+      - name: Prepare APKs
+        run: |
+          mkdir -p release-apks
+          find src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk" | while read -r apk; do
+            filename=$(basename "$apk")
+            echo "Found APK: $apk -> release-apks/remora-$filename"
+            cp "$apk" "release-apks/remora-$filename"
+          done
+          ls -la release-apks/
+
+      - name: Upload Android APKs to Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name || inputs.version }}
+          files: release-apks/*.apk
+

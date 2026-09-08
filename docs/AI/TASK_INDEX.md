@@ -35,23 +35,26 @@
 | **TASK-024** | 远端服务器安全删除回收站机制与代码编辑器语法高亮美化 | TASK-004, TASK-007, TASK-008, TASK-023 | **DONE** | `docs/AI/tasks/TASK-024.md` |
 | **TASK-025** | 全局快捷输入与分组管理系统 (Quick Snippets & Groups) | TASK-002, TASK-005, TASK-006, TASK-009 | **DONE** | `docs/AI/tasks/TASK-025.md` |
 | **TASK-026** | 快捷输入批量导入与导出功能 (Quick Snippets Import & Export) | TASK-025 | **DONE** | `docs/AI/tasks/TASK-026.md` |
+| **TASK-027** | SSH 私钥管理与连接凭证选配支持 (SSH Private Key Management & Selection) | TASK-002, TASK-003, TASK-017, TASK-019 | **DONE** | `docs/AI/tasks/TASK-027.md` |
+| **TASK-028** | 手机端响应式三板块 Tab 视图与终端辅助键盘适配 (Mobile Responsive 3-Tab Layout & Keyboard) | TASK-006, TASK-008, TASK-009 | **DONE** | `docs/AI/tasks/TASK-028.md` |
+| **TASK-029** | Android 移动端工程集成与 GitHub Release 自动打包发布 APK 体系 (Android Build & Release CI) | TASK-021, TASK-027, TASK-028 | **DONE** | `docs/AI/tasks/TASK-029.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 27
+- **已完成 (DONE)**: 30
 - **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 27
+- **总任务数**: 30
 
 ---
 
 ## 3. 项目执行总结
 
-- Remora 核心功能、远程代理注入、前后端集成、自动化构建发布体系 (`build.sh`) 全部就绪。
-- **TASK-016** 圆满完成：全面修复 UI 界面容器约束、弹窗高度超限溢出、长文本横向溢出与滚动条治理。
-- **TASK-017** 圆满完成：实现添加 SSH 服务器时直接粘贴命令行智能解析回填（支持 -i, -p, -l, -o, user@host:port 等复杂语法），并在 Remote Proxy 区域提供可视、可复制、一键填入的常用代理示例及全角冒号自动兼容。
-- **TASK-018** 圆满完成：彻底消除 Linux 环境下 Keyring 库引发的 Tokio 嵌套运行时 Panic (`Cannot start a runtime from within a runtime`)，实现 OS Keyring 专用隔离线程与 Panic 容灾降级；增加 SSH 私钥路径波浪号 (`~/`) 智能用户目录展开与细粒度认证错误反馈。
-- **TASK-019** 圆满完成：支持配置多台 SSH 服务器并发连接并独立维护状态；连接 SSH 纯粹建立网络会话而不自动强开任何目录；在 Project Explorer 与打开文件夹弹窗中全面实现根据 SSH 服务器分类查看与管理最近打开的 Project（含快捷连接、设为当前激活、删除历史及 1-Click 打开）；在多在线服务器间自由激活切换工作区。全部 20 项任务均已圆满达成！
+- Remora 核心功能、远程代理注入、前后端集成、自动化构建发布体系全部就绪。
+- **TASK-027** 圆满完成：实现基于 SQLite `ssh_keys` 表的集中式私钥管理，支持 RSA/Ed25519/OpenSSH 内存直接解码与本地文件路径双向兼容，在服务器连接中支持一键选配已存私钥。
+- **TASK-028** 圆满完成：小屏幕与手机端下全自适应三板块 Tab 切换（工作区、代码编辑器、远程终端一次只展示一个板块），文件点击自动跳转编辑器，视口动态自适应虚拟键盘（`100dvh`），并为终端提供专属移动辅助按键栏（Esc, Tab, Ctrl, Alt, 方向键等）。
+- **TASK-029** 圆满完成：完成 Tauri 2 Android Gradle 原生工程初始化，添加后端桌面与移动平台条件编译隔离，并在 GitHub Actions Release 流水线中集成 Android APK 自动打包、签名与发布资产分发。全部 30 项任务均已圆满达成！
+

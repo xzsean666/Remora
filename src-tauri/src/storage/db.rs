@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use crate::core::{
     AppError, AuthType, LayoutPreferences, QuickSnippet, RecentProject, Result, ServerConfig,
+    SshKey,
 };
 
 pub struct StorageService {
@@ -84,6 +85,16 @@ impl StorageService {
                 auto_execute INTEGER NOT NULL DEFAULT 1,
                 description TEXT,
                 sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ssh_keys (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                private_key TEXT NOT NULL,
+                passphrase TEXT,
+                public_key TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
@@ -458,5 +469,85 @@ impl StorageService {
         tx.commit()?;
         Ok(count)
     }
+
+    pub fn get_ssh_keys(&self) -> Result<Vec<SshKey>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, private_key, passphrase, public_key, created_at, updated_at
+             FROM ssh_keys ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(SshKey {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                private_key: row.get(2)?,
+                passphrase: row.get(3)?,
+                public_key: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        })?;
+
+        let mut keys = Vec::new();
+        for k in rows {
+            keys.push(k?);
+        }
+        Ok(keys)
+    }
+
+    pub fn get_ssh_key(&self, id: &str) -> Result<Option<SshKey>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, private_key, passphrase, public_key, created_at, updated_at
+             FROM ssh_keys WHERE id = ?1",
+        )?;
+        let key = stmt
+            .query_row(params![id], |row| {
+                Ok(SshKey {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    private_key: row.get(2)?,
+                    passphrase: row.get(3)?,
+                    public_key: row.get(4)?,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            })
+            .optional()?;
+        Ok(key)
+    }
+
+    pub fn save_ssh_key(&self, key: &SshKey) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO ssh_keys (id, name, private_key, passphrase, public_key, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                private_key = excluded.private_key,
+                passphrase = excluded.passphrase,
+                public_key = excluded.public_key,
+                updated_at = excluded.updated_at
+            "#,
+            params![
+                key.id,
+                key.name,
+                key.private_key,
+                key.passphrase,
+                key.public_key,
+                key.created_at,
+                key.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_ssh_key(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM ssh_keys WHERE id = ?1", params![id])?;
+        Ok(())
+    }
 }
+
 

@@ -131,21 +131,35 @@ impl ConnectionManager {
                 handle.authenticate_password(&server.username, pwd).await
             }
             AuthType::PrivateKey => {
-                if let Some(ref path) = server.key_path {
-                    let expanded_path = expand_home_dir(path);
-                    let key = match russh::keys::load_secret_key(&expanded_path, secret) {
-                        Ok(k) => k,
-                        Err(e) => {
-                            let err_msg = format!(
-                                "Failed to load private key from '{}': {}",
-                                expanded_path.display(),
-                                e
-                            );
-                            warn!("{}", err_msg);
-                            *state_arc.write().await = ConnectionState::Failed {
-                                error: err_msg.clone(),
-                            };
-                            return Err(AppError::Security(err_msg));
+                if let Some(ref path_or_content) = server.key_path {
+                    let key = if path_or_content.contains("BEGIN ") || path_or_content.contains("PRIVATE KEY") {
+                        match russh::keys::decode_secret_key(path_or_content, secret) {
+                            Ok(k) => k,
+                            Err(e) => {
+                                let err_msg = format!("Failed to decode private key: {}", e);
+                                warn!("{}", err_msg);
+                                *state_arc.write().await = ConnectionState::Failed {
+                                    error: err_msg.clone(),
+                                };
+                                return Err(AppError::Security(err_msg));
+                            }
+                        }
+                    } else {
+                        let expanded_path = expand_home_dir(path_or_content);
+                        match russh::keys::load_secret_key(&expanded_path, secret) {
+                            Ok(k) => k,
+                            Err(e) => {
+                                let err_msg = format!(
+                                    "Failed to load private key from '{}': {}",
+                                    expanded_path.display(),
+                                    e
+                                );
+                                warn!("{}", err_msg);
+                                *state_arc.write().await = ConnectionState::Failed {
+                                    error: err_msg.clone(),
+                                };
+                                return Err(AppError::Security(err_msg));
+                            }
                         }
                     };
                     let key_with_alg = russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key), None);
@@ -153,7 +167,7 @@ impl ConnectionManager {
                         .authenticate_publickey(&server.username, key_with_alg)
                         .await
                 } else {
-                    let err_msg = "Private key path not specified".to_string();
+                    let err_msg = "Private key path or content not specified".to_string();
                     *state_arc.write().await = ConnectionState::Failed {
                         error: err_msg.clone(),
                     };

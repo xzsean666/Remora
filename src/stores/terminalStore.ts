@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
-import { isRunningInTauri } from "../utils/tauriBridge";
+import { isRunningInTauri, safeInvoke } from "../utils/tauriBridge";
 
 export interface TerminalSession {
   id: string;
@@ -26,6 +26,7 @@ interface TerminalState {
   reconnectSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
   clearAllSessions: () => void;
+  sendDataToActiveTerminal: (data: string | number[]) => Promise<void>;
   initTerminalListener: () => Promise<() => void>;
 }
 
@@ -101,6 +102,28 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   clearAllSessions: () => {
     set({ sessions: [], activeSessionId: null });
+  },
+
+  sendDataToActiveTerminal: async (data: string | number[]) => {
+    const { sessions, activeSessionId } = get();
+    const active = sessions.find((s) => s.id === activeSessionId);
+    if (!active || !active.backendSessionId) return;
+
+    let bytes: number[];
+    if (typeof data === "string") {
+      bytes = Array.from(new TextEncoder().encode(data));
+    } else {
+      bytes = data;
+    }
+
+    try {
+      await safeInvoke("terminal_write", {
+        sessionId: active.backendSessionId,
+        data: bytes,
+      });
+    } catch (e) {
+      console.error("Failed to send data to active terminal:", e);
+    }
   },
 
   initTerminalListener: async () => {

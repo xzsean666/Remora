@@ -10,8 +10,8 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager, State};
 use crate::connection::{ConnectionManager, ConnectionState};
 use crate::core::{
-    AppError, FileEntry, LayoutPreferences, QuickSnippet, ReadFileResult, RecentProject, Result,
-    ServerConfig, WriteFileResult,
+    AppError, AuthType, FileEntry, LayoutPreferences, QuickSnippet, ReadFileResult, RecentProject, Result,
+    ServerConfig, SshKey, WriteFileResult,
 };
 use crate::security::KeyringService;
 use crate::sftp::SftpService;
@@ -141,6 +141,28 @@ fn import_quick_snippets(
     state.storage.import_quick_snippets(&snippets, overwrite)
 }
 
+// --- SSH Key Commands ---
+
+#[tauri::command]
+fn get_ssh_keys(state: State<'_, Arc<AppState>>) -> Result<Vec<SshKey>> {
+    state.storage.get_ssh_keys()
+}
+
+#[tauri::command]
+fn get_ssh_key(id: String, state: State<'_, Arc<AppState>>) -> Result<Option<SshKey>> {
+    state.storage.get_ssh_key(&id)
+}
+
+#[tauri::command]
+fn save_ssh_key(key: SshKey, state: State<'_, Arc<AppState>>) -> Result<()> {
+    state.storage.save_ssh_key(&key)
+}
+
+#[tauri::command]
+fn delete_ssh_key(id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
+    state.storage.delete_ssh_key(&id)
+}
+
 // --- Connection Commands ---
 
 #[tauri::command]
@@ -149,11 +171,25 @@ async fn connect_server(
     state: State<'_, Arc<AppState>>,
     app: tauri::AppHandle,
 ) -> Result<()> {
-    let server = state
+    let mut server = state
         .storage
         .get_server(&server_id)?
         .ok_or_else(|| AppError::NotFound(format!("Server {} not found", server_id)))?;
-    let secret = state.keyring.get_secret(&server_id)?;
+    let mut secret = state.keyring.get_secret(&server_id)?;
+
+    // Resolve saved private key if key_path references a saved key ID
+    if server.auth_type == AuthType::PrivateKey {
+        if let Some(ref kp) = server.key_path {
+            let key_id = kp.strip_prefix("key:").unwrap_or(kp);
+            if let Ok(Some(ssh_key)) = state.storage.get_ssh_key(key_id) {
+                server.key_path = Some(ssh_key.private_key);
+                if secret.is_none() || secret.as_deref() == Some("") {
+                    secret = ssh_key.passphrase;
+                }
+            }
+        }
+    }
+
     let res = state
         .connection
         .connect(&server, secret.as_deref())
@@ -399,19 +435,26 @@ async fn transfer_list(
 // --- Window & Lifecycle Commands ---
 
 pub fn open_new_window(app: &tauri::AppHandle) -> Result<()> {
-    let window_id = format!("window-{}", uuid::Uuid::new_v4());
-    tauri::WebviewWindowBuilder::new(
-        app,
-        &window_id,
-        tauri::WebviewUrl::App("index.html".into()),
-    )
-    .title("Remora")
-    .inner_size(1280.0, 800.0)
-    .min_inner_size(800.0, 600.0)
-    .resizable(true)
-    .decorations(true)
-    .build()
-    .map_err(|e| AppError::Internal(e.to_string()))?;
+    #[cfg(desktop)]
+    {
+        let window_id = format!("window-{}", uuid::Uuid::new_v4());
+        tauri::WebviewWindowBuilder::new(
+            app,
+            &window_id,
+            tauri::WebviewUrl::App("index.html".into()),
+        )
+        .title("Remora")
+        .inner_size(1280.0, 800.0)
+        .min_inner_size(800.0, 600.0)
+        .resizable(true)
+        .decorations(true)
+        .build()
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+    }
     Ok(())
 }
 
@@ -508,8 +551,10 @@ pub fn run() {
         transfer,
     });
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+    let mut builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             tracing::info!("Single instance notification received: {:?}", argv);
             let has_new_window_arg = argv.iter().any(|arg| arg == "--new-window" || arg == "-n");
             if has_new_window_arg {
@@ -520,7 +565,10 @@ pub fn run() {
             } else {
                 let _ = open_new_window(app);
             }
-        }))
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app_state)
@@ -532,6 +580,10 @@ pub fn run() {
             get_servers,
             save_server,
             delete_server,
+            get_ssh_keys,
+            get_ssh_key,
+            save_ssh_key,
+            delete_ssh_key,
             get_recent_projects,
             add_recent_project,
             remove_recent_project,

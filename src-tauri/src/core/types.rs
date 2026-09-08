@@ -107,3 +107,15 @@ pub struct QuickSnippet {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SshKey {
+    pub id: String,
+    pub name: String,
+    pub private_key: String,
+    pub passphrase: Option<String>,
+    pub public_key: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+
