@@ -19,19 +19,19 @@ export const EditorArea: React.FC = () => {
       {/* Disconnection / Reconnection Banner */}
       {(status === "reconnecting" || status === "failed") && (
         <div
-          className={`px-3 py-1.5 flex items-center justify-between text-xs border-b z-20 select-none animate-in fade-in duration-200 ${
+          className={`px-3 py-1.5 flex items-center justify-between text-xs border-b z-20 select-none animate-in fade-in duration-200 flex-shrink-0 ${
             status === "reconnecting"
               ? "bg-amber-950/40 border-amber-600/30 text-amber-200"
               : "bg-red-950/40 border-red-600/30 text-red-200"
           }`}
         >
-          <div className="flex items-center gap-2 truncate mr-2">
+          <div className="flex items-center gap-2 truncate mr-2 min-w-0 flex-1">
             {status === "reconnecting" ? (
               <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400 flex-shrink-0" />
             ) : (
               <AlertTriangle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
             )}
-            <span className="truncate">
+            <span className="truncate min-w-0">
               {status === "reconnecting"
                 ? `Connection interrupted. Auto-reconnecting (${reconnectAttempt}/5)... Unsaved edits are buffered safely.`
                 : "SSH connection lost. All editor changes remain safely in memory."}
@@ -52,8 +52,8 @@ export const EditorArea: React.FC = () => {
         {activeTab ? (
           <CodeEditor key={activeTab.path} tab={activeTab} />
         ) : (
-          <div className="h-full flex flex-col items-center justify-center p-6 text-center select-none">
-            <div className="max-w-md p-8 border border-vscode-border/50 rounded-2xl bg-vscode-sidebar/30 backdrop-blur-sm flex flex-col items-center">
+          <div className="h-full flex flex-col items-center justify-center p-6 text-center select-none overflow-y-auto min-h-0">
+            <div className="max-w-md p-8 border border-vscode-border/50 rounded-2xl bg-vscode-sidebar/30 backdrop-blur-sm flex flex-col items-center my-auto flex-shrink-0">
               <div className="w-14 h-14 rounded-2xl bg-vscode-activityBarActive/10 border border-vscode-activityBarActive/20 flex items-center justify-center mb-4 text-vscode-activityBarActive">
                 <Code2 className="w-7 h-7" />
               </div>

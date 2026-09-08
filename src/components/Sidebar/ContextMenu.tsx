@@ -58,10 +58,10 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   }, [onClose]);
 
   // Adjust coordinates if menu overflows window
-  const menuWidth = 180;
+  const menuWidth = 192;
   const menuHeight = 220;
-  const adjustedX = Math.min(x, window.innerWidth - menuWidth - 8);
-  const adjustedY = Math.min(y, window.innerHeight - menuHeight - 8);
+  const adjustedX = Math.max(8, Math.min(x, window.innerWidth - menuWidth - 8));
+  const adjustedY = Math.max(8, Math.min(y, window.innerHeight - menuHeight - 8));
 
   return (
     <div

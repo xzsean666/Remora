@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
+import { safeInvoke as invoke } from "../utils/tauriBridge";
 
 export interface FileEntry {
   name: string;
@@ -10,15 +10,31 @@ export interface FileEntry {
   mtime: number;
 }
 
+export interface RecentProject {
+  id: string;
+  server_id: string;
+  server_name: string;
+  project_name: string;
+  remote_path: string;
+  last_opened_at: number;
+}
+
 interface FileTreeState {
   currentServerId: string | null;
   rootPath: string | null;
+  serverRoots: Record<string, string>;
+  recentProjects: RecentProject[];
   tree: Record<string, FileEntry[]>;
   expandedPaths: string[];
   selectedPath: string | null;
   loadingPaths: string[];
+  dirErrors: Record<string, string>;
 
-  setRoot: (serverId: string, rootPath: string) => Promise<void>;
+  setRoot: (serverId: string, rootPath: string, serverName?: string) => Promise<void>;
+  switchServer: (serverId: string | null) => Promise<void>;
+  closeWorkspace: () => void;
+  loadRecentProjects: () => Promise<void>;
+  removeRecentProject: (id: string) => Promise<void>;
   loadDirectory: (dirPath: string) => Promise<void>;
   toggleExpand: (dirPath: string) => Promise<void>;
   collapseAll: () => void;
@@ -33,21 +49,126 @@ interface FileTreeState {
 export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   currentServerId: null,
   rootPath: null,
+  serverRoots: {},
+  recentProjects: [],
   tree: {},
   expandedPaths: [],
   selectedPath: null,
   loadingPaths: [],
+  dirErrors: {},
 
-  setRoot: async (serverId: string, rootPath: string) => {
-    set({
+  loadRecentProjects: async () => {
+    try {
+      const res = await invoke<RecentProject[]>("get_recent_projects", { limit: 50 });
+      set({ recentProjects: res || [] });
+    } catch (e) {
+      console.warn("Failed to load recent projects:", e);
+    }
+  },
+
+  removeRecentProject: async (id: string) => {
+    try {
+      await invoke("remove_recent_project", { id });
+      set((state) => ({
+        recentProjects: state.recentProjects.filter((p) => p.id !== id),
+      }));
+    } catch (e) {
+      console.error("Failed to remove recent project:", e);
+    }
+  },
+
+  setRoot: async (serverId: string, rootPath: string, serverName?: string) => {
+    // Normalize path (remove trailing slash unless root '/')
+    const cleanPath = rootPath.length > 1 && rootPath.endsWith("/") ? rootPath.slice(0, -1) : rootPath;
+    const projectName = cleanPath.split("/").filter(Boolean).pop() || cleanPath;
+
+    set((state) => ({
       currentServerId: serverId,
-      rootPath,
+      rootPath: cleanPath,
+      serverRoots: { ...state.serverRoots, [serverId]: cleanPath },
       tree: {},
-      expandedPaths: [rootPath],
+      expandedPaths: [cleanPath],
       selectedPath: null,
-      loadingPaths: [rootPath],
+      loadingPaths: [cleanPath],
+      dirErrors: {},
+    }));
+
+    // Record into SQLite recent_projects
+    try {
+      await invoke("add_recent_project", {
+        project: {
+          id: `${serverId}:${cleanPath}`,
+          server_id: serverId,
+          server_name: serverName || serverId,
+          project_name: projectName,
+          remote_path: cleanPath,
+          last_opened_at: Date.now(),
+        },
+      });
+      await get().loadRecentProjects();
+    } catch (e) {
+      console.warn("Failed to record recent project:", e);
+    }
+
+    await get().loadDirectory(cleanPath);
+  },
+
+  switchServer: async (serverId: string | null) => {
+    if (!serverId) {
+      set({
+        currentServerId: null,
+        rootPath: null,
+        tree: {},
+        expandedPaths: [],
+        selectedPath: null,
+        loadingPaths: [],
+        dirErrors: {},
+      });
+      return;
+    }
+
+    const { serverRoots } = get();
+    const existingRoot = serverRoots[serverId];
+
+    if (existingRoot) {
+      set({
+        currentServerId: serverId,
+        rootPath: existingRoot,
+        tree: {},
+        expandedPaths: [existingRoot],
+        selectedPath: null,
+        loadingPaths: [existingRoot],
+        dirErrors: {},
+      });
+      await get().loadDirectory(existingRoot);
+    } else {
+      set({
+        currentServerId: serverId,
+        rootPath: null,
+        tree: {},
+        expandedPaths: [],
+        selectedPath: null,
+        loadingPaths: [],
+        dirErrors: {},
+      });
+    }
+  },
+
+  closeWorkspace: () => {
+    const { currentServerId, serverRoots } = get();
+    const updatedRoots = { ...serverRoots };
+    if (currentServerId) {
+      delete updatedRoots[currentServerId];
+    }
+    set({
+      rootPath: null,
+      serverRoots: updatedRoots,
+      tree: {},
+      expandedPaths: [],
+      selectedPath: null,
+      loadingPaths: [],
+      dirErrors: {},
     });
-    await get().loadDirectory(rootPath);
   },
 
   loadDirectory: async (dirPath: string) => {
@@ -64,14 +185,21 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
         path: dirPath,
       });
 
-      set((state) => ({
-        tree: { ...state.tree, [dirPath]: entries },
-        loadingPaths: state.loadingPaths.filter((p) => p !== dirPath),
-      }));
+      set((state) => {
+        const nextErrors = { ...state.dirErrors };
+        delete nextErrors[dirPath];
+        return {
+          tree: { ...state.tree, [dirPath]: entries },
+          loadingPaths: state.loadingPaths.filter((p) => p !== dirPath),
+          dirErrors: nextErrors,
+        };
+      });
     } catch (err) {
       console.error(`Failed to read directory ${dirPath}:`, err);
+      const errMsg = String(err).replace(/^Error:\s*/, "");
       set((state) => ({
         loadingPaths: state.loadingPaths.filter((p) => p !== dirPath),
+        dirErrors: { ...state.dirErrors, [dirPath]: errMsg },
       }));
     }
   },

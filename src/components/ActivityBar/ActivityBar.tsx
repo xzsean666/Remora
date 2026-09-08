@@ -1,12 +1,13 @@
 import React from "react";
-import { FolderTree, Server, ArrowLeftRight, Settings, TerminalSquare } from "lucide-react";
+import { FolderTree, Server, ArrowLeftRight, Settings, TerminalSquare, CopyPlus } from "lucide-react";
 import { useLayoutStore, SidebarTab } from "../../stores/layoutStore";
+import { createNewWindow } from "../../utils/tauriBridge";
 
 export const ActivityBar: React.FC = () => {
   const {
     activeSidebarTab,
     isSidebarOpen,
-    setActiveSidebarTab,
+    toggleSidebarTab,
     isTerminalOpen,
     toggleTerminal,
   } = useLayoutStore();
@@ -26,7 +27,7 @@ export const ActivityBar: React.FC = () => {
             <button
               key={item.id}
               title={item.label}
-              onClick={() => setActiveSidebarTab(item.id)}
+              onClick={() => toggleSidebarTab(item.id)}
               className={`p-2.5 rounded transition-colors relative w-10 h-10 flex items-center justify-center ${
                 isActive
                   ? "text-vscode-textBright bg-vscode-hover"
@@ -44,6 +45,13 @@ export const ActivityBar: React.FC = () => {
 
       <div className="flex flex-col gap-2 w-full items-center">
         <button
+          title="New Window (Ctrl+Shift+N)"
+          onClick={() => createNewWindow()}
+          className="p-2.5 rounded transition-colors w-10 h-10 flex items-center justify-center text-vscode-textMuted hover:text-white hover:bg-vscode-hover"
+        >
+          <CopyPlus className="w-5 h-5" />
+        </button>
+        <button
           title="Toggle Terminal Panel (`)"
           onClick={toggleTerminal}
           className={`p-2.5 rounded transition-colors w-10 h-10 flex items-center justify-center ${
@@ -56,7 +64,7 @@ export const ActivityBar: React.FC = () => {
         </button>
         <button
           title="Settings"
-          onClick={() => setActiveSidebarTab("settings")}
+          onClick={() => toggleSidebarTab("settings")}
           className={`p-2.5 rounded transition-colors w-10 h-10 flex items-center justify-center ${
             isSidebarOpen && activeSidebarTab === "settings"
               ? "text-vscode-textBright bg-vscode-hover"

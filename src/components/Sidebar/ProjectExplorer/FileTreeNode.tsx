@@ -75,7 +75,7 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
         style={{ paddingLeft: `${Math.max(6, level * 14 + 6)}px` }}
-        className={`h-6 flex items-center pr-2 cursor-pointer transition-colors group relative ${
+        className={`h-6 flex items-center pr-2 cursor-pointer transition-colors group relative min-w-0 overflow-hidden ${
           isSelected
             ? "bg-vscode-selected text-white"
             : "text-vscode-text hover:bg-vscode-hover hover:text-vscode-textBright"
@@ -103,24 +103,28 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
         )}
 
         {/* File Type Icon */}
-        <span className="mr-1.5 flex items-center">
+        <span className="mr-1.5 flex items-center flex-shrink-0">
           {getFileIcon(entry.name, entry.is_dir, isExpanded)}
         </span>
 
         {/* Node Name or Rename Input */}
         {isRenaming ? (
-          <NewItemInput
-            initialValue={entry.name}
-            onConfirm={async (newName) => {
-              setIsRenaming(false);
-              if (newName && newName !== entry.name) {
-                await renameItem(entry.path, newName);
-              }
-            }}
-            onCancel={() => setIsRenaming(false)}
-          />
+          <div className="flex-1 min-w-0">
+            <NewItemInput
+              initialValue={entry.name}
+              onConfirm={async (newName) => {
+                setIsRenaming(false);
+                if (newName && newName !== entry.name) {
+                  await renameItem(entry.path, newName);
+                }
+              }}
+              onCancel={() => setIsRenaming(false)}
+            />
+          </div>
         ) : (
-          <span className="truncate flex-1 tracking-tight font-sans">{entry.name}</span>
+          <span className="truncate flex-1 tracking-tight font-sans min-w-0" title={entry.name}>
+            {entry.name}
+          </span>
         )}
       </div>
 
@@ -130,24 +134,26 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
           {creatingType && (
             <div
               style={{ paddingLeft: `${(level + 1) * 14 + 6}px` }}
-              className="h-6 flex items-center pr-2"
+              className="h-6 flex items-center pr-2 min-w-0 overflow-hidden"
             >
               <span className="w-4 mr-0.5 flex-shrink-0" />
-              <span className="mr-1.5 flex items-center">
+              <span className="mr-1.5 flex items-center flex-shrink-0">
                 {getFileIcon("new", creatingType === "dir", false)}
               </span>
-              <NewItemInput
-                onConfirm={async (name) => {
-                  const type = creatingType;
-                  setCreatingType(null);
-                  if (type === "file") {
-                    await createFile(entry.path, name);
-                  } else {
-                    await createDir(entry.path, name);
-                  }
-                }}
-                onCancel={() => setCreatingType(null)}
-              />
+              <div className="flex-1 min-w-0">
+                <NewItemInput
+                  onConfirm={async (name) => {
+                    const type = creatingType;
+                    setCreatingType(null);
+                    if (type === "file") {
+                      await createFile(entry.path, name);
+                    } else {
+                      await createDir(entry.path, name);
+                    }
+                  }}
+                  onCancel={() => setCreatingType(null)}
+                />
+              </div>
             </div>
           )}
 

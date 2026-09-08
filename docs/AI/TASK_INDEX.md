@@ -24,20 +24,29 @@
 | **TASK-013** | 远程服务器代理配置与终端环境变量自动注入 | TASK-002, TASK-005, TASK-009, TASK-012 | **DONE** | `docs/AI/tasks/TASK-013.md` |
 | **TASK-014** | 远程代理 No Proxy (Bypass List) 默认内置扩展与配置支持 | TASK-013 | **DONE** | `docs/AI/tasks/TASK-014.md` |
 | **TASK-015** | 跨平台自动化 Release 构建脚本 (build.sh) 与打包产物分发目录支持 | TASK-014 | **DONE** | `docs/AI/tasks/TASK-015.md` |
+| **TASK-016** | UI 界面容器布局与溢出缺陷全面优化修复 | TASK-006, TASK-013, TASK-014 | **DONE** | `docs/AI/tasks/TASK-016.md` |
+| **TASK-017** | SSH 命令行快速解析导入与代理示例复制填充 | TASK-002, TASK-003, TASK-013, TASK-016 | **DONE** | `docs/AI/tasks/TASK-017.md` |
+| **TASK-018** | 修复 Linux Keyring 与 Tokio 运行时冲突及 SSH 私钥波浪号展开 | TASK-002, TASK-003, TASK-017 | **DONE** | `docs/AI/tasks/TASK-018.md` |
+| **TASK-019** | 多 SSH 服务器并发连接状态维护、活动服务器激活切换与远程项目目录打开工作流 | TASK-002, TASK-003, TASK-004, TASK-007, TASK-017, TASK-018 | **DONE** | `docs/AI/tasks/TASK-019.md` |
+| **TASK-020** | 修复集成终端中文/CJK 输入法重复与多次输入缺陷 | TASK-009, TASK-019 | **DONE** | `docs/AI/tasks/TASK-020.md` |
+| **TASK-021** | 多窗口协同、Ubuntu 桌面集成与跨平台自动发布与更新体系 | TASK-015, TASK-020 | **DONE** | `docs/AI/tasks/TASK-021.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 16
+- **已完成 (DONE)**: 22
 - **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 16
+- **总任务数**: 22
 
 ---
 
 ## 3. 项目执行总结
 
-- **所有任务已全部圆满完成 (100% DONE)**！
-- Remora 核心功能、远程代理注入、前后端集成、自动化构建发布体系 (`build.sh`) 与打包校验全部就绪。
+- Remora 核心功能、远程代理注入、前后端集成、自动化构建发布体系 (`build.sh`) 全部就绪。
+- **TASK-016** 圆满完成：全面修复 UI 界面容器约束、弹窗高度超限溢出、长文本横向溢出与滚动条治理。
+- **TASK-017** 圆满完成：实现添加 SSH 服务器时直接粘贴命令行智能解析回填（支持 -i, -p, -l, -o, user@host:port 等复杂语法），并在 Remote Proxy 区域提供可视、可复制、一键填入的常用代理示例及全角冒号自动兼容。
+- **TASK-018** 圆满完成：彻底消除 Linux 环境下 Keyring 库引发的 Tokio 嵌套运行时 Panic (`Cannot start a runtime from within a runtime`)，实现 OS Keyring 专用隔离线程与 Panic 容灾降级；增加 SSH 私钥路径波浪号 (`~/`) 智能用户目录展开与细粒度认证错误反馈。
+- **TASK-019** 圆满完成：支持配置多台 SSH 服务器并发连接并独立维护状态；连接 SSH 纯粹建立网络会话而不自动强开任何目录；在 Project Explorer 与打开文件夹弹窗中全面实现根据 SSH 服务器分类查看与管理最近打开的 Project（含快捷连接、设为当前激活、删除历史及 1-Click 打开）；在多在线服务器间自由激活切换工作区。全部 20 项任务均已圆满达成！

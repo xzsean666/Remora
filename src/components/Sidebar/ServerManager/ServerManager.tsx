@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { safeInvoke as invoke, isRunningInTauri } from "../../../utils/tauriBridge";
 import {
   Server,
   Plus,
@@ -13,9 +13,20 @@ import {
   Globe,
   Pencil,
   ShieldCheck,
+  X,
+  Terminal,
+  Sparkles,
+  Copy,
+  Check,
+  Radio,
+  FolderTree,
+  ChevronRight,
 } from "lucide-react";
 import { useFileTreeStore } from "../../../stores/fileTreeStore";
 import { useConnectionStore } from "../../../stores/connectionStore";
+import { useLayoutStore } from "../../../stores/layoutStore";
+import { parseSshCommand } from "../../../utils/sshParser";
+import { OpenFolderModal } from "../ProjectExplorer/OpenFolderModal";
 
 export const DEFAULT_NO_PROXY =
   "localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,172.17.0.0/16,172.18.0.0/16,172.19.0.0/16,172.20.0.0/16,192.168.0.0/16,*.local,.internal,host.docker.internal";
@@ -37,10 +48,10 @@ export interface ServerConfig {
 
 export const ServerManager: React.FC = () => {
   const [servers, setServers] = useState<ServerConfig[]>([]);
-  const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingServerId, setEditingServerId] = useState<string | null>(null);
+  const [openFolderServerId, setOpenFolderServerId] = useState<string | null>(null);
 
   // Form states
   const [name, setName] = useState("");
@@ -54,13 +65,48 @@ export const ServerManager: React.FC = () => {
   const [remoteProxy, setRemoteProxy] = useState("");
   const [remoteNoProxy, setRemoteNoProxy] = useState(DEFAULT_NO_PROXY);
 
-  const { setRoot } = useFileTreeStore();
-  const { setConnectedServer } = useConnectionStore();
+  // Quick SSH command parse state
+  const [sshCmdInput, setSshCmdInput] = useState("");
+  const [parseFeedback, setParseFeedback] = useState<{
+    message: string;
+    type: "success" | "error";
+  } | null>(null);
+  const [copiedProxy, setCopiedProxy] = useState<string | null>(null);
+
+  const {
+    setRoot,
+    serverRoots,
+    switchServer,
+    recentProjects,
+    loadRecentProjects,
+    removeRecentProject,
+  } = useFileTreeStore();
+  const {
+    serverStates,
+    activeServerId,
+    setServersList,
+    setActiveServerId,
+    setServerState,
+    syncConnectionStates,
+  } = useConnectionStore();
+  const { setActiveSidebarTab } = useLayoutStore();
 
   const loadServers = async () => {
     try {
       const res = await invoke<ServerConfig[]>("get_servers");
       setServers(res);
+      const metas = res.map((s) => ({
+        id: s.id,
+        name: s.name,
+        host: s.host,
+        port: s.port,
+        username: s.username,
+        remoteProxy: s.remote_proxy,
+        defaultWorkspace: s.default_workspace,
+      }));
+      setServersList(metas);
+      await syncConnectionStates();
+      await loadRecentProjects();
     } catch (err) {
       console.error("Failed to load servers:", err);
     }
@@ -70,8 +116,38 @@ export const ServerManager: React.FC = () => {
     loadServers();
   }, []);
 
+  const handleParseCommand = (cmd: string) => {
+    const res = parseSshCommand(cmd);
+    if (res.success && res.data) {
+      setHost(res.data.host);
+      setPort(res.data.port);
+      setUsername(res.data.username);
+      setAuthType(res.data.authType);
+      if (res.data.keyPath) {
+        setKeyPath(res.data.keyPath);
+      }
+      if (!name || name === "root" || name.includes("@") || editingServerId === null) {
+        setName(res.data.name);
+      }
+      setParseFeedback({
+        message: `Parsed: ${res.data.username}@${res.data.host}:${res.data.port}${res.data.keyPath ? ` (Key: ${res.data.keyPath})` : ""}`,
+        type: "success",
+      });
+      setTimeout(() => setParseFeedback(null), 4000);
+    } else {
+      setParseFeedback({
+        message: res.error || "Failed to parse SSH command",
+        type: "error",
+      });
+      setTimeout(() => setParseFeedback(null), 4000);
+    }
+  };
+
   const resetForm = () => {
     setEditingServerId(null);
+    setSshCmdInput("");
+    setParseFeedback(null);
+    setCopiedProxy(null);
     setName("");
     setHost("");
     setPort(22);
@@ -86,6 +162,9 @@ export const ServerManager: React.FC = () => {
 
   const handleEdit = (srv: ServerConfig) => {
     setEditingServerId(srv.id);
+    setSshCmdInput("");
+    setParseFeedback(null);
+    setCopiedProxy(null);
     setName(srv.name);
     setHost(srv.host);
     setPort(srv.port);
@@ -141,15 +220,16 @@ export const ServerManager: React.FC = () => {
 
   const handleConnect = async (srv: ServerConfig) => {
     setConnectingId(srv.id);
+    setServerState(srv.id, "connecting");
     try {
       await invoke("connect_server", { serverId: srv.id });
-      setActiveServerId(srv.id);
-      setConnectedServer(srv.id, srv.name, srv.remote_proxy);
-      if (srv.default_workspace) {
-        await setRoot(srv.id, srv.default_workspace);
+      setServerState(srv.id, "connected");
+      if (!activeServerId || serverStates[activeServerId] !== "connected") {
+        setActiveServerId(srv.id);
       }
     } catch (err) {
-      alert(`SSH Connection failed: ${String(err)}`);
+      setServerState(srv.id, "failed", { error: String(err) });
+      alert(`SSH Connection to ${srv.name} failed: ${String(err)}`);
     } finally {
       setConnectingId(null);
     }
@@ -158,13 +238,15 @@ export const ServerManager: React.FC = () => {
   const handleDisconnect = async (srvId: string) => {
     try {
       await invoke("disconnect_server", { serverId: srvId });
-      if (activeServerId === srvId) {
-        setActiveServerId(null);
-        setConnectedServer(null);
-      }
+      setServerState(srvId, "disconnected");
     } catch (err) {
       console.error("Disconnect failed:", err);
     }
+  };
+
+  const handleActivate = async (srv: ServerConfig) => {
+    setActiveServerId(srv.id);
+    await switchServer(srv.id);
   };
 
   const handleDelete = async (srvId: string) => {
@@ -178,58 +260,103 @@ export const ServerManager: React.FC = () => {
   return (
     <div className="flex flex-col h-full select-none text-xs">
       {/* Header with Add Button */}
-      <div className="h-7 px-3 bg-vscode-sidebar/90 border-b border-vscode-border/40 flex items-center justify-between font-bold text-[11px] text-vscode-textBright uppercase">
-        <span>Configured Servers ({servers.length})</span>
+      <div className="h-7 px-3 bg-vscode-sidebar/90 border-b border-vscode-border/40 flex items-center justify-between font-bold text-[11px] text-vscode-textBright uppercase flex-shrink-0">
+        <span className="truncate min-w-0 mr-1">Configured Servers ({servers.length})</span>
         <button
           onClick={() => setShowAddModal(true)}
           title="Add New SSH Server"
-          className="p-1 hover:text-white hover:bg-vscode-hover rounded flex items-center gap-1 text-xs"
+          className="p-1 hover:text-white hover:bg-vscode-hover rounded flex items-center gap-1 text-xs flex-shrink-0"
         >
           <Plus className="w-3.5 h-3.5" />
         </button>
       </div>
 
+      {/* Web Preview Mode notice if in browser */}
+      {!isRunningInTauri() && (
+        <div className="mx-2 mt-2 px-2.5 py-1.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] leading-relaxed flex-shrink-0">
+          🌐 <strong>浏览器 Web 预览模式</strong>：数据已暂存至浏览器。连接真实 SSH 请在终端执行 <code className="bg-black/30 px-1 rounded font-mono text-amber-200">pnpm tauri dev</code> 启动桌面端。
+        </div>
+      )}
+
       {/* Server List */}
-      <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-2">
+      <div className="flex-1 min-h-0 overflow-y-auto p-2 flex flex-col gap-2">
         {servers.map((srv) => {
-          const isConnected = activeServerId === srv.id;
-          const isConnecting = connectingId === srv.id;
+          const status = serverStates[srv.id] || "disconnected";
+          const isConnected = status === "connected";
+          const isConnecting = status === "connecting" || connectingId === srv.id;
+          const isActive = activeServerId === srv.id && isConnected;
+          const currentWorkspace = serverRoots[srv.id];
 
           return (
             <div
               key={srv.id}
-              className={`p-2.5 rounded-lg border transition-all flex flex-col gap-1.5 ${
-                isConnected
-                  ? "bg-vscode-selected/20 border-vscode-activityBarActive text-white"
+              className={`p-3 rounded-xl border transition-all flex flex-col gap-2 min-w-0 ${
+                isActive
+                  ? "bg-vscode-selected/15 border-vscode-activityBarActive ring-1 ring-vscode-activityBarActive/40 text-white shadow-sm"
+                  : isConnected
+                  ? "bg-emerald-950/20 border-emerald-500/40 text-vscode-text hover:border-emerald-500/70"
                   : "bg-vscode-bg/60 border-vscode-border text-vscode-text hover:border-vscode-border/80"
               }`}
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 font-medium">
-                  <Server className="w-4 h-4 text-vscode-activityBarActive" />
-                  <span className="truncate">{srv.name}</span>
+              <div className="flex items-center justify-between gap-1.5 min-w-0">
+                <div className="flex items-center gap-2 font-medium min-w-0 flex-1">
+                  <div
+                    className={`p-1.5 rounded-lg flex-shrink-0 ${
+                      isActive
+                        ? "bg-vscode-activityBarActive/20 text-vscode-activityBarActive"
+                        : isConnected
+                        ? "bg-emerald-500/20 text-emerald-400"
+                        : "bg-vscode-border/40 text-vscode-textMuted"
+                    }`}
+                  >
+                    <Server className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold text-vscode-textBright truncate text-xs" title={srv.name}>
+                        {srv.name}
+                      </span>
+                      {isActive && (
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-vscode-activityBarActive text-white font-medium flex-shrink-0">
+                          Active
+                        </span>
+                      )}
+                      {!isActive && isConnected && (
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-medium flex-shrink-0">
+                          Connected
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] font-mono text-vscode-textMuted truncate">
+                      {srv.username}@{srv.host}:{srv.port}
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 flex-shrink-0">
                   {isConnected ? (
                     <button
                       onClick={() => handleDisconnect(srv.id)}
-                      title="Disconnect"
-                      className="p-1 text-emerald-400 hover:text-rose-400 rounded"
+                      title="Disconnect SSH"
+                      className="p-1.5 text-emerald-400 hover:text-rose-400 hover:bg-vscode-hover rounded-md transition-colors"
                     >
-                      <Wifi className="w-3.5 h-3.5" />
+                      <Wifi className="w-4 h-4" />
                     </button>
                   ) : (
                     <button
                       onClick={() => handleConnect(srv)}
                       disabled={isConnecting}
-                      title="Connect SSH"
-                      className="p-1 text-vscode-textMuted hover:text-emerald-400 rounded"
+                      title={status === "failed" ? "Retry SSH Connection" : "Connect SSH"}
+                      className={`p-1.5 rounded-md transition-colors ${
+                        status === "failed"
+                          ? "text-rose-400 hover:bg-rose-500/20"
+                          : "text-vscode-textMuted hover:text-emerald-400 hover:bg-vscode-hover"
+                      }`}
                     >
                       {isConnecting ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-vscode-activityBarActive" />
+                        <Loader2 className="w-4 h-4 animate-spin text-vscode-activityBarActive" />
                       ) : (
-                        <WifiOff className="w-3.5 h-3.5" />
+                        <WifiOff className="w-4 h-4" />
                       )}
                     </button>
                   )}
@@ -237,7 +364,7 @@ export const ServerManager: React.FC = () => {
                   <button
                     onClick={() => handleEdit(srv)}
                     title="Edit Server"
-                    className="p-1 text-vscode-textMuted hover:text-white rounded"
+                    className="p-1.5 text-vscode-textMuted hover:text-white hover:bg-vscode-hover rounded-md transition-colors"
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
@@ -245,38 +372,151 @@ export const ServerManager: React.FC = () => {
                   <button
                     onClick={() => handleDelete(srv.id)}
                     title="Delete Server"
-                    className="p-1 text-vscode-textMuted hover:text-rose-400 rounded"
+                    className="p-1.5 text-vscode-textMuted hover:text-rose-400 hover:bg-vscode-hover rounded-md transition-colors"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
 
-              <div className="text-[11px] text-vscode-textMuted flex items-center justify-between font-mono">
-                <span>{srv.username}@{srv.host}:{srv.port}</span>
-                <span className="capitalize text-[10px] px-1.5 py-0.5 rounded bg-vscode-sidebar border border-vscode-border">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="capitalize text-[10px] px-1.5 py-0.5 rounded bg-vscode-sidebar border border-vscode-border text-vscode-textMuted font-mono">
                   {srv.auth_type}
                 </span>
+
+                {srv.remote_proxy && (
+                  <span
+                    className="text-[10px] text-sky-400 px-1.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 flex items-center gap-1 font-mono truncate max-w-[180px]"
+                    title={`Proxy: ${srv.remote_proxy}`}
+                  >
+                    <Globe className="w-2.5 h-2.5 flex-shrink-0" />
+                    <span className="truncate">{srv.remote_proxy}</span>
+                  </span>
+                )}
               </div>
 
-              {srv.remote_proxy && (
-                <div className="text-[10px] text-sky-400/90 flex items-center gap-1 font-mono">
-                  <Globe className="w-3 h-3 text-sky-400 flex-shrink-0" />
-                  <span className="truncate" title={`Remote proxy: ${srv.remote_proxy}`}>
-                    Proxy: {srv.remote_proxy}
+              {/* Active Server Switch Row */}
+              {isConnected && (
+                <div className="pt-2 border-t border-vscode-border/50 flex items-center justify-between gap-2">
+                  <span className="text-[11px] text-vscode-textMuted">
+                    {isActive ? (
+                      <span className="text-emerald-400 font-medium flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Current Active Server
+                      </span>
+                    ) : (
+                      "Connected (Standby)"
+                    )}
                   </span>
+
+                  {!isActive && (
+                    <button
+                      onClick={() => handleActivate(srv)}
+                      className="px-2 py-0.5 rounded bg-vscode-activityBarActive text-white text-[11px] font-medium hover:brightness-110 transition-all flex items-center gap-1 shadow-xs"
+                    >
+                      <Radio className="w-3 h-3" />
+                      Set Active (激活)
+                    </button>
+                  )}
                 </div>
               )}
 
-              {isConnected && srv.default_workspace && (
-                <button
-                  onClick={() => setRoot(srv.id, srv.default_workspace!)}
-                  className="mt-1 w-full py-1 px-2 rounded bg-vscode-selected text-white text-xs flex items-center justify-center gap-1.5 hover:brightness-110"
-                >
-                  <FolderOpen className="w-3.5 h-3.5" />
-                  <span>Explore {srv.default_workspace}</span>
-                </button>
-              )}
+              {/* Categorized Projects for this Server */}
+              {(() => {
+                const srvProjects = recentProjects.filter((p) => p.server_id === srv.id);
+
+                return (
+                  <div className="pt-2 border-t border-vscode-border/50 flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-semibold text-vscode-textBright flex items-center gap-1.5">
+                        <FolderTree className="w-3.5 h-3.5 text-vscode-activityBarActive" />
+                        <span>Projects / 最近项目 ({srvProjects.length})</span>
+                      </span>
+                      <button
+                        onClick={() => setOpenFolderServerId(srv.id)}
+                        className="text-[10px] text-vscode-activityBarActive hover:underline flex items-center gap-1 font-medium cursor-pointer"
+                        title={`Open a directory on ${srv.name}`}
+                      >
+                        <Plus className="w-3 h-3" />
+                        Open Project
+                      </button>
+                    </div>
+
+                    {srvProjects.length > 0 ? (
+                      <div className="flex flex-col gap-1">
+                        {srvProjects.map((p) => {
+                          const isOpened = currentWorkspace === p.remote_path;
+                          return (
+                            <div
+                              key={p.id}
+                              onClick={async () => {
+                                if (!isConnected) {
+                                  await handleConnect(srv);
+                                }
+                                setActiveServerId(srv.id);
+                                await setRoot(srv.id, p.remote_path, srv.name);
+                                setActiveSidebarTab("explorer");
+                              }}
+                              className={`px-2.5 py-1.5 rounded-lg border flex items-center justify-between group cursor-pointer transition-all ${
+                                isOpened
+                                  ? "bg-vscode-selected/20 border-vscode-activityBarActive text-white"
+                                  : "bg-vscode-bg/70 border-vscode-border hover:border-vscode-activityBarActive/80 hover:bg-vscode-hover text-vscode-text"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0 flex-1">
+                                <FolderOpen
+                                  className={`w-3.5 h-3.5 flex-shrink-0 ${
+                                    isOpened ? "text-emerald-400" : "text-vscode-activityBarActive"
+                                  }`}
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-medium truncate flex items-center gap-1.5">
+                                    <span className="text-vscode-textBright">{p.project_name}</span>
+                                    {isOpened && (
+                                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono">
+                                        Opened
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div
+                                    className="text-[10px] font-mono text-vscode-textMuted truncate"
+                                    title={p.remote_path}
+                                  >
+                                    {p.remote_path}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1 flex-shrink-0">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeRecentProject(p.id);
+                                  }}
+                                  title="Remove from history"
+                                  className="opacity-0 group-hover:opacity-100 p-1 rounded hover:text-rose-400 hover:bg-vscode-border text-vscode-textMuted transition-all"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                                <ChevronRight className="w-3.5 h-3.5 text-vscode-textMuted group-hover:text-white transition-transform group-hover:translate-x-0.5" />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="p-2 rounded-lg bg-vscode-bg/40 border border-vscode-border/50 text-[11px] text-vscode-textMuted flex items-center justify-between">
+                        <span>No projects opened yet</span>
+                        <button
+                          onClick={() => setOpenFolderServerId(srv.id)}
+                          className="text-vscode-activityBarActive hover:underline text-[11px] font-medium"
+                        >
+                          + Open folder...
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           );
         })}
@@ -295,167 +535,343 @@ export const ServerManager: React.FC = () => {
         )}
       </div>
 
-      {/* Add Server Modal Dialog */}
+      {/* Add / Edit Server Modal Dialog (Fixed out-of-frame overflow) */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-vscode-sidebar border border-vscode-border rounded-xl shadow-2xl p-4 flex flex-col gap-3 text-vscode-text">
-            <h2 className="text-sm font-semibold text-vscode-textBright">
-              {editingServerId ? "Edit SSH Server" : "Add SSH Server"}
-            </h2>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-hidden">
+          <div className="w-full max-w-lg bg-vscode-sidebar border border-vscode-border rounded-xl shadow-2xl flex flex-col max-h-[88vh] text-vscode-text overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="px-5 py-3 border-b border-vscode-border/60 flex items-center justify-between flex-shrink-0">
+              <h2 className="text-sm font-semibold text-vscode-textBright flex items-center gap-2">
+                <Server className="w-4 h-4 text-vscode-activityBarActive" />
+                <span>{editingServerId ? "Edit SSH Server" : "Add SSH Server"}</span>
+              </h2>
+              <button
+                type="button"
+                onClick={() => {
+                  resetForm();
+                  setShowAddModal(false);
+                }}
+                className="p-1 rounded text-vscode-textMuted hover:text-white hover:bg-vscode-hover transition-colors"
+                title="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
-            <form onSubmit={handleSave} className="flex flex-col gap-2.5">
-              <div>
-                <label className="text-[11px] text-vscode-textMuted block mb-1">Server Name</label>
-                <input
-                  required
-                  placeholder="e.g. Ubuntu Production"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-vscode-bg border border-vscode-border rounded px-2 py-1 text-xs outline-none focus:border-vscode-activityBarActive"
-                />
-              </div>
+            {/* Modal Form with Scrollable Content Body */}
+            <form onSubmit={handleSave} className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 flex flex-col gap-3">
+                {/* Quick Parse SSH Command Input */}
+                <div className="bg-vscode-bg/80 border border-vscode-activityBarActive/40 rounded-lg p-2.5 flex flex-col gap-2">
+                  <div className="flex items-center justify-between min-w-0">
+                    <span className="text-[11px] font-semibold text-vscode-textBright flex items-center gap-1.5 truncate min-w-0">
+                      <Terminal className="w-3.5 h-3.5 text-vscode-activityBarActive flex-shrink-0" />
+                      <span>Quick Parse SSH Command / 快捷命令解析</span>
+                    </span>
+                    {parseFeedback && (
+                      <span
+                        className={`text-[10px] truncate max-w-[220px] flex-shrink-0 ${
+                          parseFeedback.type === "success" ? "text-emerald-400 font-medium" : "text-rose-400"
+                        }`}
+                        title={parseFeedback.message}
+                      >
+                        {parseFeedback.message}
+                      </span>
+                    )}
+                  </div>
 
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <label className="text-[11px] text-vscode-textMuted block mb-1">Host / IP</label>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      placeholder="e.g. ssh -i ~/ssh/sean -p 22 root@192.168.31.110"
+                      value={sshCmdInput}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSshCmdInput(val);
+                        // If pasted or contains full command flags, auto parse
+                        if (
+                          val.trim().startsWith("ssh ") ||
+                          val.includes(" -i ") ||
+                          val.includes(" -p ") ||
+                          val.includes("@")
+                        ) {
+                          handleParseCommand(val);
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleParseCommand(sshCmdInput);
+                        }
+                      }}
+                      className="flex-1 min-w-0 bg-vscode-sidebar border border-vscode-border rounded px-2.5 py-1.5 text-xs font-mono outline-none focus:border-vscode-activityBarActive transition-colors"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleParseCommand(sshCmdInput)}
+                      className="px-3 py-1.5 rounded bg-vscode-activityBarActive text-white text-xs hover:brightness-110 font-medium transition-all flex items-center gap-1 flex-shrink-0 cursor-pointer"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      <span>Parse / 解析</span>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-[10px] text-vscode-textMuted flex-wrap">
+                    <span>Quick Examples:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cmd = "ssh -i ~/ssh/sean -p 22 root@192.168.31.110";
+                        setSshCmdInput(cmd);
+                        handleParseCommand(cmd);
+                      }}
+                      className="font-mono text-[10px] text-vscode-textMuted hover:text-white bg-vscode-sidebar px-1.5 py-0.5 rounded border border-vscode-border/60 hover:border-vscode-border transition-colors cursor-pointer select-all"
+                      title="Click to parse: ssh -i ~/ssh/sean -p 22 root@192.168.31.110"
+                    >
+                      ssh -i ~/ssh/sean -p 22 root@192.168.31.110
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cmd = "ssh -p 2222 root@192.168.31.110";
+                        setSshCmdInput(cmd);
+                        handleParseCommand(cmd);
+                      }}
+                      className="font-mono text-[10px] text-vscode-textMuted hover:text-white bg-vscode-sidebar px-1.5 py-0.5 rounded border border-vscode-border/60 hover:border-vscode-border transition-colors cursor-pointer select-all"
+                      title="Click to parse: ssh -p 2222 root@192.168.31.110"
+                    >
+                      ssh -p 2222 root@192.168.31.110
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] text-vscode-textMuted block mb-1">Server Name</label>
                   <input
                     required
-                    placeholder="192.168.1.100"
-                    value={host}
-                    onChange={(e) => setHost(e.target.value)}
-                    className="w-full bg-vscode-bg border border-vscode-border rounded px-2 py-1 text-xs outline-none focus:border-vscode-activityBarActive"
+                    placeholder="e.g. Ubuntu Production"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full bg-vscode-bg border border-vscode-border rounded px-2.5 py-1.5 text-xs outline-none focus:border-vscode-activityBarActive transition-colors"
                   />
                 </div>
-                <div className="w-20">
-                  <label className="text-[11px] text-vscode-textMuted block mb-1">Port</label>
-                  <input
-                    type="number"
-                    value={port}
-                    onChange={(e) => setPort(Number(e.target.value))}
-                    className="w-full bg-vscode-bg border border-vscode-border rounded px-2 py-1 text-xs outline-none focus:border-vscode-activityBarActive"
-                  />
+
+                <div className="flex gap-2">
+                  <div className="flex-1 min-w-0">
+                    <label className="text-[11px] text-vscode-textMuted block mb-1">Host / IP</label>
+                    <input
+                      required
+                      placeholder="192.168.1.100"
+                      value={host}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const trimmed = val.trim();
+                        if (
+                          trimmed.startsWith("ssh ") ||
+                          trimmed.startsWith("ssh.exe ") ||
+                          trimmed.includes(" -p ") ||
+                          trimmed.includes(" -i ")
+                        ) {
+                          setSshCmdInput(val);
+                          handleParseCommand(val);
+                        } else {
+                          setHost(val);
+                        }
+                      }}
+                      className="w-full bg-vscode-bg border border-vscode-border rounded px-2.5 py-1.5 text-xs outline-none focus:border-vscode-activityBarActive transition-colors font-mono"
+                    />
+                  </div>
+                  <div className="w-24 flex-shrink-0">
+                    <label className="text-[11px] text-vscode-textMuted block mb-1">Port</label>
+                    <input
+                      type="number"
+                      value={port}
+                      onChange={(e) => setPort(Number(e.target.value))}
+                      className="w-full bg-vscode-bg border border-vscode-border rounded px-2.5 py-1.5 text-xs outline-none focus:border-vscode-activityBarActive transition-colors font-mono"
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div>
-                <label className="text-[11px] text-vscode-textMuted block mb-1">Username</label>
-                <input
-                  required
-                  placeholder="root / ubuntu"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full bg-vscode-bg border border-vscode-border rounded px-2 py-1 text-xs outline-none focus:border-vscode-activityBarActive"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] text-vscode-textMuted block mb-1">Authentication</label>
-                <select
-                  value={authType}
-                  onChange={(e) => setAuthType(e.target.value as any)}
-                  className="w-full bg-vscode-bg border border-vscode-border rounded px-2 py-1 text-xs outline-none focus:border-vscode-activityBarActive"
-                >
-                  <option value="password">Password</option>
-                  <option value="private_key">Private Key File</option>
-                  <option value="agent">SSH Agent (SSH_AUTH_SOCK)</option>
-                </select>
-              </div>
-
-              {authType === "password" && (
                 <div>
-                  <label className="text-[11px] text-vscode-textMuted block mb-1 flex items-center gap-1">
-                    <Lock className="w-3 h-3" /> Password (Stored in OS Keyring)
-                  </label>
+                  <label className="text-[11px] text-vscode-textMuted block mb-1">Username</label>
                   <input
-                    type="password"
-                    placeholder={editingServerId ? "Leave blank to keep existing password" : "Password"}
-                    value={secret}
-                    onChange={(e) => setSecret(e.target.value)}
-                    className="w-full bg-vscode-bg border border-vscode-border rounded px-2 py-1 text-xs outline-none focus:border-vscode-activityBarActive"
+                    required
+                    placeholder="root / ubuntu"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="w-full bg-vscode-bg border border-vscode-border rounded px-2.5 py-1.5 text-xs outline-none focus:border-vscode-activityBarActive transition-colors font-mono"
                   />
                 </div>
-              )}
 
-              {authType === "private_key" && (
-                <>
+                <div>
+                  <label className="text-[11px] text-vscode-textMuted block mb-1">Authentication</label>
+                  <select
+                    value={authType}
+                    onChange={(e) => setAuthType(e.target.value as any)}
+                    className="w-full bg-vscode-bg border border-vscode-border rounded px-2.5 py-1.5 text-xs outline-none focus:border-vscode-activityBarActive transition-colors cursor-pointer"
+                  >
+                    <option value="password">Password</option>
+                    <option value="private_key">Private Key File</option>
+                    <option value="agent">SSH Agent (SSH_AUTH_SOCK)</option>
+                  </select>
+                </div>
+
+                {authType === "password" && (
                   <div>
                     <label className="text-[11px] text-vscode-textMuted block mb-1 flex items-center gap-1">
-                      <Key className="w-3 h-3" /> Private Key Path
+                      <Lock className="w-3 h-3 text-amber-400" /> Password (Stored in OS Keyring)
                     </label>
                     <input
-                      placeholder="/home/user/.ssh/id_ed25519"
-                      value={keyPath}
-                      onChange={(e) => setKeyPath(e.target.value)}
-                      className="w-full bg-vscode-bg border border-vscode-border rounded px-2 py-1 text-xs outline-none focus:border-vscode-activityBarActive"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] text-vscode-textMuted block mb-1">Passphrase (Optional)</label>
-                    <input
                       type="password"
-                      placeholder={editingServerId ? "Leave blank to keep existing passphrase" : "Key Passphrase"}
+                      placeholder={editingServerId ? "Leave blank to keep existing password" : "Password"}
                       value={secret}
                       onChange={(e) => setSecret(e.target.value)}
-                      className="w-full bg-vscode-bg border border-vscode-border rounded px-2 py-1 text-xs outline-none focus:border-vscode-activityBarActive"
+                      className="w-full bg-vscode-bg border border-vscode-border rounded px-2.5 py-1.5 text-xs outline-none focus:border-vscode-activityBarActive transition-colors"
                     />
                   </div>
-                </>
-              )}
+                )}
 
-              <div>
-                <label className="text-[11px] text-vscode-textMuted block mb-1">Default Workspace Path</label>
-                <input
-                  placeholder="/var/www / /home/user/project"
-                  value={workspace}
-                  onChange={(e) => setWorkspace(e.target.value)}
-                  className="w-full bg-vscode-bg border border-vscode-border rounded px-2 py-1 text-xs outline-none focus:border-vscode-activityBarActive"
-                />
+                {authType === "private_key" && (
+                  <>
+                    <div>
+                      <label className="text-[11px] text-vscode-textMuted block mb-1 flex items-center gap-1">
+                        <Key className="w-3 h-3 text-amber-400" /> Private Key Path
+                      </label>
+                      <input
+                        placeholder="/home/user/.ssh/id_ed25519"
+                        value={keyPath}
+                        onChange={(e) => setKeyPath(e.target.value)}
+                        className="w-full bg-vscode-bg border border-vscode-border rounded px-2.5 py-1.5 text-xs outline-none focus:border-vscode-activityBarActive transition-colors font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-vscode-textMuted block mb-1">Passphrase (Optional)</label>
+                      <input
+                        type="password"
+                        placeholder={editingServerId ? "Leave blank to keep existing passphrase" : "Key Passphrase"}
+                        value={secret}
+                        onChange={(e) => setSecret(e.target.value)}
+                        className="w-full bg-vscode-bg border border-vscode-border rounded px-2.5 py-1.5 text-xs outline-none focus:border-vscode-activityBarActive transition-colors"
+                      />
+                    </div>
+                  </>
+                )}
+
+                <div>
+                  <label className="text-[11px] text-vscode-textMuted block mb-1">Default Workspace Path</label>
+                  <input
+                    placeholder="/var/www or /home/user/project"
+                    value={workspace}
+                    onChange={(e) => setWorkspace(e.target.value)}
+                    className="w-full bg-vscode-bg border border-vscode-border rounded px-2.5 py-1.5 text-xs outline-none focus:border-vscode-activityBarActive transition-colors font-mono"
+                  />
+                </div>
+
+                <div className="pt-2 border-t border-vscode-border/40">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[11px] text-vscode-textMuted flex items-center gap-1">
+                      <Globe className="w-3 h-3 text-sky-400" /> Remote Proxy (Optional / 默认无代理)
+                    </label>
+                    {remoteProxy && (
+                      <button
+                        type="button"
+                        onClick={() => setRemoteProxy("")}
+                        className="text-[10px] text-rose-400 hover:text-rose-300 transition-colors"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Copyable & Clickable Example Chips */}
+                  <div className="mb-2 bg-vscode-bg/60 border border-vscode-border/60 rounded p-2 flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between text-[10px] text-vscode-textMuted">
+                      <span>常用示例 (点击直接填入，或选中/右侧复制):</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {[
+                        "127.0.0.1:1080",
+                        "127.0.0.1:7890",
+                        "socks5://127.0.0.1:1080",
+                        "http://127.0.0.1:10808",
+                      ].map((ex) => (
+                        <div key={ex} className="flex items-center">
+                          <button
+                            type="button"
+                            onClick={() => setRemoteProxy(ex)}
+                            title={`Click to fill: ${ex}`}
+                            className="font-mono text-[10px] text-sky-400 hover:text-white bg-vscode-sidebar px-2 py-0.5 rounded-l border border-vscode-border hover:border-sky-400/60 transition-colors cursor-pointer select-all"
+                          >
+                            {ex}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(ex);
+                                setCopiedProxy(ex);
+                                setTimeout(() => setCopiedProxy(null), 2000);
+                              } catch (e) {
+                                console.error("Clipboard error:", e);
+                              }
+                            }}
+                            title={`Copy ${ex} to clipboard`}
+                            className="bg-vscode-sidebar border-t border-r border-b border-vscode-border hover:border-sky-400/60 hover:text-white px-1.5 py-0.5 rounded-r text-vscode-textMuted transition-colors cursor-pointer"
+                          >
+                            {copiedProxy === ex ? (
+                              <Check className="w-2.5 h-2.5 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-2.5 h-2.5" />
+                            )}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <input
+                    placeholder="e.g. 127.0.0.1:1080 or http://127.0.0.1:1080"
+                    value={remoteProxy}
+                    onChange={(e) => setRemoteProxy(e.target.value.replace(/：/g, ":").trim())}
+                    className="w-full bg-vscode-bg border border-vscode-border rounded px-2.5 py-1.5 text-xs outline-none focus:border-vscode-activityBarActive transition-colors font-mono text-[11px]"
+                  />
+                  <p className="text-[10px] text-vscode-textMuted/80 mt-1">
+                    Injected into remote terminal (http_proxy, https_proxy & all_proxy)
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-[11px] text-vscode-textMuted block mb-1 flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3 text-emerald-400" /> No Proxy (Bypass List)
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder={DEFAULT_NO_PROXY}
+                    value={remoteNoProxy}
+                    onChange={(e) => setRemoteNoProxy(e.target.value)}
+                    className="w-full bg-vscode-bg border border-vscode-border rounded px-2.5 py-1.5 text-xs outline-none focus:border-vscode-activityBarActive transition-colors font-mono text-[11px] resize-none"
+                  />
+                  <p className="text-[10px] text-vscode-textMuted/80 mt-0.5">
+                    Pre-filled: Docker (172.16.0.0/12), LAN (10.0.0.0/8, 192.168.0.0/16), loopback & *.local
+                  </p>
+                </div>
               </div>
 
-              <div>
-                <label className="text-[11px] text-vscode-textMuted block mb-1 flex items-center gap-1">
-                  <Globe className="w-3 h-3 text-sky-400" /> Remote Proxy (Optional)
-                </label>
-                <input
-                  placeholder="e.g. 127.0.0.1:1080 or http://127.0.0.1:1080"
-                  value={remoteProxy}
-                  onChange={(e) => setRemoteProxy(e.target.value)}
-                  className="w-full bg-vscode-bg border border-vscode-border rounded px-2 py-1 text-xs outline-none focus:border-vscode-activityBarActive font-mono"
-                />
-                <p className="text-[10px] text-vscode-textMuted/70 mt-0.5">
-                  Injected into remote terminal (http_proxy, https_proxy & all_proxy)
-                </p>
-              </div>
-
-              <div>
-                <label className="text-[11px] text-vscode-textMuted block mb-1 flex items-center gap-1">
-                  <ShieldCheck className="w-3 h-3 text-emerald-400" /> No Proxy (Bypass List)
-                </label>
-                <input
-                  placeholder={DEFAULT_NO_PROXY}
-                  value={remoteNoProxy}
-                  onChange={(e) => setRemoteNoProxy(e.target.value)}
-                  className="w-full bg-vscode-bg border border-vscode-border rounded px-2 py-1 text-xs outline-none focus:border-vscode-activityBarActive font-mono text-[11px]"
-                />
-                <p className="text-[10px] text-vscode-textMuted/70 mt-0.5">
-                  Pre-filled: Docker (172.16.0.0/12), LAN (10.0.0.0/8, 192.168.0.0/16), loopback & *.local
-                </p>
-              </div>
-
-              <div className="flex justify-end gap-2 mt-3">
+              {/* Modal Footer (Fixed at bottom) */}
+              <div className="px-5 py-3 bg-vscode-sidebar/90 border-t border-vscode-border/60 flex items-center justify-end gap-2 flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => {
                     resetForm();
                     setShowAddModal(false);
                   }}
-                  className="px-3 py-1.5 rounded hover:bg-vscode-hover text-xs"
+                  className="px-3 py-1.5 rounded hover:bg-vscode-hover text-xs transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-3 py-1.5 rounded bg-vscode-activityBarActive text-white text-xs hover:brightness-110 font-medium"
+                  className="px-4 py-1.5 rounded bg-vscode-activityBarActive text-white text-xs hover:brightness-110 font-medium transition-all shadow-xs"
                 >
                   {editingServerId ? "Update Server" : "Save Server"}
                 </button>
@@ -464,6 +880,12 @@ export const ServerManager: React.FC = () => {
           </div>
         </div>
       )}
+
+      <OpenFolderModal
+        isOpen={Boolean(openFolderServerId)}
+        onClose={() => setOpenFolderServerId(null)}
+        targetServerId={openFolderServerId}
+      />
     </div>
   );
 };

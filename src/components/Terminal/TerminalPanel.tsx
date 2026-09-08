@@ -9,16 +9,20 @@ import { XtermView } from "./XtermView";
 export const TerminalPanel: React.FC = () => {
   const { sessions, activeSessionId, addSession } = useTerminalStore();
   const { currentServerId, rootPath } = useFileTreeStore();
-  const { connectedServerProxy } = useConnectionStore();
+  const { connectedServerProxy, activeServerId, connectedServerName } = useConnectionStore();
+
+  const effectiveServerId = activeServerId || currentServerId;
 
   const handleCreateTerminal = () => {
-    if (!currentServerId) return;
+    if (!effectiveServerId) return;
 
     const nextIndex = sessions.length + 1;
+    const srvLabel = connectedServerName ? `[${connectedServerName}] ` : "";
     const newSession = {
       id: `term-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      title: `${nextIndex}: bash`,
-      serverId: currentServerId,
+      title: `${srvLabel}${nextIndex}: bash`,
+      serverId: effectiveServerId,
+      serverName: connectedServerName || undefined,
       initialDir: rootPath || undefined,
       remoteProxy: connectedServerProxy || undefined,
       status: "connecting" as const,
@@ -38,7 +42,7 @@ export const TerminalPanel: React.FC = () => {
           <div className="w-full h-full flex flex-col items-center justify-center p-4 text-center">
             <TerminalIcon className="w-8 h-8 text-vscode-textMuted/40 mb-2" />
             <p className="text-xs text-vscode-textMuted mb-3">No active terminal session</p>
-            {currentServerId ? (
+            {effectiveServerId ? (
               <button
                 onClick={handleCreateTerminal}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-vscode-activityBarActive text-white rounded text-xs font-medium hover:bg-vscode-activityBarActive/90 transition-colors shadow-xs"

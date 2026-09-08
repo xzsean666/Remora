@@ -58,4 +58,49 @@ mod tests {
         let res = manager.reconnect("non-existent-server", None).await;
         assert!(res.is_err());
     }
+
+    #[test]
+    fn test_expand_home_dir() {
+        use super::super::manager::expand_home_dir;
+
+        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/home/test"));
+
+        let p1 = expand_home_dir("~/ssh/sean");
+        assert_eq!(p1, home.join("ssh/sean"));
+
+        let p2 = expand_home_dir("~");
+        assert_eq!(p2, home);
+
+        let p3 = expand_home_dir("/etc/ssh/ssh_host_rsa_key");
+        assert_eq!(p3, std::path::PathBuf::from("/etc/ssh/ssh_host_rsa_key"));
+
+        // Quotes should be trimmed
+        let p4 = expand_home_dir("\"~/ssh/sean\"");
+        assert_eq!(p4, home.join("ssh/sean"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_keyring_inside_tokio_worker_runtime() {
+        use crate::security::KeyringService;
+
+        // This verifies that invoking keyring inside a multi-threaded Tokio worker thread
+        // NEVER causes 'Cannot start a runtime from within a runtime' panic!
+        let keyring = KeyringService::new();
+        let set_res = keyring.set_secret("srv-tokio-test", "tokio-pass-123");
+        assert!(set_res.is_ok());
+
+        let get_res = keyring.get_secret("srv-tokio-test");
+        assert!(get_res.is_ok());
+        assert_eq!(get_res.unwrap(), Some("tokio-pass-123".to_string()));
+
+        let del_res = keyring.delete_secret("srv-tokio-test");
+        assert!(del_res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_all_states() {
+        let manager = ConnectionManager::new();
+        let all_states = manager.get_all_states().await;
+        assert!(all_states.is_empty());
+    }
 }

@@ -42,6 +42,9 @@ impl StorageService {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(
             r#"
+            PRAGMA journal_mode=WAL;
+            PRAGMA busy_timeout=5000;
+
             CREATE TABLE IF NOT EXISTS servers (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,

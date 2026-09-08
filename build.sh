@@ -258,6 +258,20 @@ case "$BUILD_MODE" in
     ;;
 esac
 
+# 检测并设置 Tauri 签名密钥
+KEY_CANDIDATE="${HOME}/.tauri/remora.key"
+if [ ! -f "${KEY_CANDIDATE}" ] && [ -f "/home/sean/.tauri/remora.key" ]; then
+  KEY_CANDIDATE="/home/sean/.tauri/remora.key"
+fi
+
+if [ -f "${KEY_CANDIDATE}" ]; then
+  export TAURI_SIGNING_PRIVATE_KEY="$(cat "${KEY_CANDIDATE}")"
+  export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
+  log_info "已载入 Tauri Updater 签名密钥: ${KEY_CANDIDATE}"
+else
+  TAURI_ARGS+=("--no-sign")
+fi
+
 # 执行 Tauri Release 构建
 pnpm tauri build "${TAURI_ARGS[@]}"
 
@@ -288,9 +302,9 @@ log_success "已归档主程序: ${RELEASE_DIR}/${BIN_NAME}"
 # 收集 bundles (若存在)
 BUNDLE_DIR="${SCRIPT_DIR}/src-tauri/target/release/bundle"
 if [ -d "$BUNDLE_DIR" ]; then
-  # 收集 deb 包
+  # 收集 deb 包与签名
   if [ -d "${BUNDLE_DIR}/deb" ]; then
-    find "${BUNDLE_DIR}/deb" -maxdepth 1 -name "*.deb" -exec cp -f {} "${RELEASE_DIR}/" \;
+    find "${BUNDLE_DIR}/deb" -maxdepth 1 \( -name "*.deb" -o -name "*.sig" \) -exec cp -f {} "${RELEASE_DIR}/" \;
   fi
   # 收集 appimage (若存在)
   if [ -d "${BUNDLE_DIR}/appimage" ]; then

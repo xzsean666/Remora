@@ -1,0 +1,4 @@
+# pnpm 现代版本（v11+ / v12+）依赖构建脚本安全放行清单
+# 解决 pnpm 默认拦截 postinstall 等生命周期脚本导致的 ERR_PNPM_IGNORED_BUILDS 错误
+allowBuilds:
+  esbuild: true

@@ -49,17 +49,17 @@ export const TransferPanel: React.FC = () => {
   return (
     <div className="flex flex-col h-full overflow-hidden select-none bg-vscode-sidebar text-xs">
       {/* Header */}
-      <div className="h-7 px-3 bg-vscode-sidebar/90 border-b border-vscode-border/40 flex items-center justify-between text-[11px] font-bold text-vscode-textBright uppercase">
-        <div className="flex items-center gap-1.5">
-          <span>Transfers</span>
+      <div className="h-7 px-3 bg-vscode-sidebar/90 border-b border-vscode-border/40 flex items-center justify-between text-[11px] font-bold text-vscode-textBright uppercase flex-shrink-0">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="truncate">Transfers</span>
           {activeCount > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full bg-vscode-activityBarActive text-[10px] text-white font-mono">
+            <span className="px-1.5 py-0.2 rounded-full bg-vscode-activityBarActive text-[10px] text-white font-mono flex-shrink-0">
               {activeCount}
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 flex-shrink-0">
           <button
             title="Refresh Transfers"
             onClick={fetchTransfers}
@@ -78,7 +78,7 @@ export const TransferPanel: React.FC = () => {
       </div>
 
       {/* Transfers List */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-2">
+      <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-2">
         {transfers.length === 0 ? (
           <div className="p-4 text-center text-vscode-textMuted flex flex-col items-center justify-center gap-2 mt-10">
             <UploadCloud className="w-10 h-10 opacity-30 text-vscode-textBright" />
@@ -128,7 +128,7 @@ const TransferCard: React.FC<TransferCardProps> = ({ item, onCancel }) => {
               <ArrowDownLeft className="w-3.5 h-3.5" />
             </span>
           )}
-          <span className="truncate font-medium text-vscode-textBright text-xs" title={item.filename}>
+          <span className="truncate font-medium text-vscode-textBright text-xs min-w-0" title={item.filename}>
             {item.filename}
           </span>
         </div>
@@ -146,7 +146,7 @@ const TransferCard: React.FC<TransferCardProps> = ({ item, onCancel }) => {
       </div>
 
       {/* Progress Bar */}
-      <div className="w-full h-1.5 bg-vscode-border/50 rounded-full overflow-hidden">
+      <div className="w-full h-1.5 bg-vscode-border/50 rounded-full overflow-hidden flex-shrink-0">
         <div
           style={{ width: `${percentage}%` }}
           className={`h-full transition-all duration-150 ${
@@ -162,12 +162,12 @@ const TransferCard: React.FC<TransferCardProps> = ({ item, onCancel }) => {
       </div>
 
       {/* Stats Footer */}
-      <div className="flex items-center justify-between text-[10px] text-vscode-textMuted font-mono">
-        <span>
+      <div className="flex items-center justify-between text-[10px] text-vscode-textMuted font-mono gap-1 min-w-0">
+        <span className="truncate min-w-0 flex-1">
           {formatBytes(item.transferred_bytes)} / {formatBytes(item.total_bytes)}
         </span>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-shrink-0">
           {item.status === "transferring" && (
             <span className="text-blue-400 font-sans">
               {formatBytes(item.speed_bps)}/s

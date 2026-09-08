@@ -20,14 +20,17 @@
 ## 2. 核心功能矩阵 (MVP Scope)
 
 1. **SSH Connection & Security**:
-   - 支持 Password、SSH 私钥 (RSA/Ed25519)、SSH Agent (`SSH_AUTH_SOCK`)、`~/.ssh/config` 导入。
-   - 凭证使用系统安全存储 (OS Keyring / SecretService)，敏感信息严禁明文落地。
+   - 支持 Password、SSH 私钥 (RSA/Ed25519)、SSH Agent (`SSH_AUTH_SOCK`)、`~/.ssh/config` 导入与命令行快速分词解析。
+   - 支持多台 SSH 服务器并发保持连接与后台会话隔离。
+   - 支持在多个在线服务器中自由切换当前活动工作区服务器 (Active Server Switching)。
+   - 凭证使用系统安全存储 (OS Keyring / SecretService 隔离线程)，敏感信息严禁明文落地。
    - TCP Keepalive、心跳检测与断线自动重连。
 
-2. **Remote Project Root**:
+2. **Remote Project Root & Multi-Workspace Workflow**:
    - 以远程目录作为 Workspace Root（如 `/home/sean/projects/my-app`）。
-   - Project Explorer 树形聚焦于当前项目。
-   - 最近打开项目 (Recent Projects) 快速切换。
+   - 提供通用“打开项目/文件夹”交互弹窗，支持自定义输入路径、家目录/默认工作区快捷填充与最近历史一键直达。
+   - Project Explorer 树形聚焦于当前活动服务器的项目，记住各服务器独立的工作区。
+   - 最近打开项目 (Recent Projects) 持久化存储与快速切换。
 
 3. **Project File Explorer**:
    - 树形折叠展开与按需懒加载 (Lazy Loading)。

@@ -26,14 +26,32 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": "all",
+    "active": true,
+    "targets": ["deb"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "copyright": "Copyright (c) 2026 Remora Team",
+    "category": "DeveloperTool",
+    "shortDescription": "Lightweight SSH Remote Workspace Desktop Client",
+    "longDescription": "A lightweight SSH remote workspace desktop client inspired by VS Code.",
+    "linux": {
+      "deb": {
+        "desktopTemplate": "templates/desktop.template"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZDNTFGNkE4OUM3ODI0OTUKUldTVkpIaWNxUFpSYkxiSkZ6T2lac3VYbldlblg4VktRcGdMSno0NlJWUUZsbGpnVkw3YUhmTXIK",
+      "endpoints": [
+        "https://github.com/xzsean666/Remora/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

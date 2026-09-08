@@ -9,7 +9,7 @@ export const EditorTabBar: React.FC = () => {
   if (tabs.length === 0) return null;
 
   return (
-    <div className="h-9 bg-[#252526] border-b border-vscode-border/80 flex items-center overflow-x-auto overflow-y-hidden select-none scrollbar-none">
+    <div className="h-9 bg-[#252526] border-b border-vscode-border/80 flex items-center overflow-x-auto overflow-y-hidden select-none scrollbar-none flex-shrink-0">
       {tabs.map((tab) => {
         const isActive = tab.path === activeTabPath;
 
@@ -38,7 +38,7 @@ export const EditorTabBar: React.FC = () => {
 
             {/* File Name */}
             <span
-              className={`truncate text-xs flex-1 ${
+              className={`truncate text-xs flex-1 min-w-0 ${
                 tab.isPreview ? "italic opacity-85" : ""
               }`}
             >

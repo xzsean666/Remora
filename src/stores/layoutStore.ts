@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
+import { safeInvoke as invoke } from "../utils/tauriBridge";
 
 export type SidebarTab = "explorer" | "servers" | "transfers" | "settings";
 
@@ -25,6 +25,8 @@ interface LayoutState {
   toggleTerminal: () => void;
   setTerminalOpen: (open: boolean) => void;
   setActiveSidebarTab: (tab: SidebarTab) => void;
+  toggleSidebarTab: (tab: SidebarTab) => void;
+  resetLayout: () => void;
   initFromPreferences: () => Promise<void>;
   persistPreferences: () => Promise<void>;
 }
@@ -39,14 +41,26 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   activeSidebarTab: "explorer",
 
   setSidebarWidth: (width: number) => {
-    const clamped = Math.max(160, Math.min(600, width));
+    const maxWidth = typeof window !== "undefined" ? Math.max(260, Math.min(600, window.innerWidth - 300)) : 600;
+    const clamped = Math.max(160, Math.min(maxWidth, width));
     set({ sidebarWidth: clamped });
     get().persistPreferences();
   },
 
   setTerminalHeight: (height: number) => {
-    const clamped = Math.max(100, Math.min(600, height));
+    const maxHeight = typeof window !== "undefined" ? Math.max(160, Math.min(600, window.innerHeight - 160)) : 600;
+    const clamped = Math.max(100, Math.min(maxHeight, height));
     set({ terminalHeight: clamped });
+    get().persistPreferences();
+  },
+
+  resetLayout: () => {
+    set({
+      sidebarWidth: 260,
+      terminalHeight: 240,
+      isSidebarOpen: true,
+      isTerminalOpen: true,
+    });
     get().persistPreferences();
   },
 
@@ -71,6 +85,13 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   },
 
   setActiveSidebarTab: (tab: SidebarTab) => {
+    // Programmatic tab navigation always ensures sidebar is open
+    set({ activeSidebarTab: tab, isSidebarOpen: true });
+    get().persistPreferences();
+  },
+
+  toggleSidebarTab: (tab: SidebarTab) => {
+    // ActivityBar icon click toggles sidebar if clicking the already open active tab
     const { activeSidebarTab, isSidebarOpen } = get();
     if (activeSidebarTab === tab && isSidebarOpen) {
       set({ isSidebarOpen: false });

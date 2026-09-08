@@ -1,0 +1,18 @@
+[Desktop Entry]
+Categories={{categories}}
+{{#if comment}}
+Comment={{comment}}
+{{/if}}
+Exec={{exec}} %U
+Icon={{icon}}
+Name={{name}}
+Terminal=false
+Type=Application
+StartupWMClass=remora
+Actions=new-window;
+
+[Desktop Action new-window]
+Name=New Window
+Name[zh_CN]=新建窗口
+Exec={{exec}} --new-window %U
+Icon={{icon}}

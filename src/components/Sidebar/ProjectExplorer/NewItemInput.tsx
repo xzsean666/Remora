@@ -41,7 +41,7 @@ export const NewItemInput: React.FC<NewItemInputProps> = ({
       onChange={(e) => setValue(e.target.value)}
       onKeyDown={handleKeyDown}
       onBlur={onCancel}
-      className="w-full bg-vscode-bg border border-vscode-activityBarActive text-vscode-textBright text-xs px-1 py-0.5 rounded outline-none shadow-inner"
+      className="w-full min-w-0 bg-vscode-bg border border-vscode-activityBarActive text-vscode-textBright text-xs px-1 py-0.5 rounded outline-none shadow-inner"
     />
   );
 };

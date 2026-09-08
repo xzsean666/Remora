@@ -22,6 +22,20 @@ pub struct ConnectionManager {
     sessions: Arc<RwLock<HashMap<String, Arc<RwLock<ConnectionSession>>>>>,
 }
 
+pub fn expand_home_dir(path_str: &str) -> std::path::PathBuf {
+    let clean_path = path_str.trim().trim_matches('\'').trim_matches('"');
+    if let Some(stripped) = clean_path.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(stripped);
+        }
+    } else if clean_path == "~" {
+        if let Some(home) = dirs::home_dir() {
+            return home;
+        }
+    }
+    std::path::PathBuf::from(clean_path)
+}
+
 impl ConnectionManager {
     pub fn new() -> Self {
         Self {
@@ -38,6 +52,17 @@ impl ConnectionManager {
         } else {
             ConnectionState::Disconnected
         }
+    }
+
+    pub async fn get_all_states(&self) -> HashMap<String, ConnectionState> {
+        let sessions = self.sessions.read().await;
+        let mut map = HashMap::new();
+        for (id, session_lock) in sessions.iter() {
+            let session = session_lock.read().await;
+            let current_state = session.state.read().await.clone();
+            map.insert(id.clone(), current_state);
+        }
+        map
     }
 
     pub async fn set_state(&self, server_id: &str, new_state: ConnectionState) {
@@ -107,14 +132,32 @@ impl ConnectionManager {
             }
             AuthType::PrivateKey => {
                 if let Some(ref path) = server.key_path {
-                    let key = russh::keys::load_secret_key(path, secret)
-                        .map_err(|e| AppError::Security(format!("Failed to load private key: {}", e)))?;
+                    let expanded_path = expand_home_dir(path);
+                    let key = match russh::keys::load_secret_key(&expanded_path, secret) {
+                        Ok(k) => k,
+                        Err(e) => {
+                            let err_msg = format!(
+                                "Failed to load private key from '{}': {}",
+                                expanded_path.display(),
+                                e
+                            );
+                            warn!("{}", err_msg);
+                            *state_arc.write().await = ConnectionState::Failed {
+                                error: err_msg.clone(),
+                            };
+                            return Err(AppError::Security(err_msg));
+                        }
+                    };
                     let key_with_alg = russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key), None);
                     handle
                         .authenticate_publickey(&server.username, key_with_alg)
                         .await
                 } else {
-                    Err(russh::Error::NoAuthMethod)
+                    let err_msg = "Private key path not specified".to_string();
+                    *state_arc.write().await = ConnectionState::Failed {
+                        error: err_msg.clone(),
+                    };
+                    return Err(AppError::Security(err_msg));
                 }
             }
             AuthType::Agent => {
@@ -161,8 +204,17 @@ impl ConnectionManager {
                 *handle_guard = Some(handle);
                 Ok(())
             }
-            Ok(_) | Err(_) => {
-                let err_msg = "SSH authentication failed".to_string();
+            Ok(other) => {
+                let err_msg = format!("SSH authentication rejected: {:?}", other);
+                warn!("{}", err_msg);
+                *state_arc.write().await = ConnectionState::Failed {
+                    error: err_msg.clone(),
+                };
+                Err(AppError::Connection(err_msg))
+            }
+            Err(e) => {
+                let err_msg = format!("SSH authentication failed: {}", e);
+                warn!("{}", err_msg);
                 *state_arc.write().await = ConnectionState::Failed {
                     error: err_msg.clone(),
                 };

@@ -24,19 +24,19 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({ children }) 
       className="h-full bg-vscode-sidebar flex flex-col flex-shrink-0 select-none overflow-hidden"
     >
       {/* Sidebar Header */}
-      <div className="h-9 px-3 flex items-center justify-between border-b border-vscode-border/50 text-xs font-semibold tracking-wider text-vscode-textMuted uppercase">
-        <span>{titles[activeSidebarTab] || "SIDEBAR"}</span>
+      <div className="h-9 px-3 flex items-center justify-between border-b border-vscode-border/50 text-xs font-semibold tracking-wider text-vscode-textMuted uppercase flex-shrink-0">
+        <span className="truncate min-w-0 mr-1">{titles[activeSidebarTab] || "SIDEBAR"}</span>
         <button
           title="Collapse Sidebar"
           onClick={() => setSidebarOpen(false)}
-          className="p-1 hover:text-vscode-textBright hover:bg-vscode-hover rounded"
+          className="p-1 hover:text-vscode-textBright hover:bg-vscode-hover rounded flex-shrink-0 transition-colors"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Sidebar Content */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+      {/* Sidebar Content (Managed by sub-panels) */}
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
         {children}
       </div>
     </div>

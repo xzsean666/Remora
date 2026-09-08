@@ -120,6 +120,18 @@
   - **安全注入与环境规范**: 在交互式 PTY Shell 启动成功后，自动注入大小写全套标准环境变量：`http_proxy`、`https_proxy`、`all_proxy`、`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 以及 `no_proxy`、`NO_PROXY`。
   - **友好即时反馈**: 结合 `cd` 初始工作区与 `clear` 清屏后，通过 POSIX 兼容的 `printf` 打印青色高亮提示（`[Remora] Remote proxy active: <proxy>`），终端标签栏展示 Globe 图标与 Tooltip。
 
+### 优化 9: 多 SSH 服务器并发连接与活动工作区激活机制 (Multi-Server Concurrency & Active Workspace)
+- **挑战**: 用户在日常开发中常需同时连接生产环境、测试环境与跳板机，或在不同服务器间协同作业。原先的单连接单态模型会导致新连接冲掉旧连接，且缺乏灵活打开和切换任意远程目录（Project）的能力。
+- **架构方案**:
+  - **后端多会话隔离**: `ConnectionManager` 采用 `RwLock<HashMap<String, Arc<RwLock<ConnectionSession>>>>` 维护独立的 TCP/SSH 会话，并通过 `get_all_connection_states` 全量状态查询对齐状态。
+  - **前端状态机解耦**: `connectionStore` 维护 `serverStates: Record<string, ConnectionStatus>`，支持各服务器独立连接与断开。
+  - **活动工作区调度 (Active Server & Workspace Mapping)**:
+    - 引入 `activeServerId` 与 `serverRoots: Record<string, string>` 记录每台服务器最后打开的项目路径。
+    - 切换活动服务器时，Project Explorer 自动恢复对应服务器的项目目录，状态栏与终端即刻联动。
+  - **交互式打开文件夹与历史持久化**:
+    - 提供通用的 `OpenFolderModal` 弹窗，支持自定义路径、快捷路径填充（`~`、默认工作区、根路径）。
+    - 自动将每次打开的工作区同步记录至 SQLite 的 `recent_projects` 表，支持 1-Click 快速进入。
+
 ---
 
 ## 3. 技术栈选型

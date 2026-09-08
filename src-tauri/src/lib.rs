@@ -7,7 +7,7 @@ pub mod terminal;
 pub mod transfer;
 
 use std::sync::Arc;
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 use crate::connection::{ConnectionManager, ConnectionState};
 use crate::core::{
     AppError, FileEntry, LayoutPreferences, ReadFileResult, RecentProject, Result,
@@ -158,6 +158,13 @@ async fn get_connection_state(
     state: State<'_, Arc<AppState>>,
 ) -> Result<ConnectionState> {
     Ok(state.connection.get_state(&server_id).await)
+}
+
+#[tauri::command]
+async fn get_all_connection_states(
+    state: State<'_, Arc<AppState>>,
+) -> Result<std::collections::HashMap<String, ConnectionState>> {
+    Ok(state.connection.get_all_states().await)
 }
 
 // --- SFTP Commands ---
@@ -336,6 +343,98 @@ async fn transfer_list(
     Ok(state.transfer.list_transfers().await)
 }
 
+// --- Window & Lifecycle Commands ---
+
+pub fn open_new_window(app: &tauri::AppHandle) -> Result<()> {
+    let window_id = format!("window-{}", uuid::Uuid::new_v4());
+    tauri::WebviewWindowBuilder::new(
+        app,
+        &window_id,
+        tauri::WebviewUrl::App("index.html".into()),
+    )
+    .title("Remora")
+    .inner_size(1280.0, 800.0)
+    .min_inner_size(800.0, 600.0)
+    .resizable(true)
+    .decorations(true)
+    .build()
+    .map_err(|e| AppError::Internal(e.to_string()))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn create_new_window(app: tauri::AppHandle) -> Result<()> {
+    open_new_window(&app)
+}
+
+#[derive(serde::Serialize)]
+pub struct AppUpdateMetadata {
+    pub available: bool,
+    pub current_version: String,
+    pub latest_version: Option<String>,
+    pub body: Option<String>,
+    pub date: Option<String>,
+}
+
+#[tauri::command]
+async fn check_update(app: tauri::AppHandle) -> Result<AppUpdateMetadata> {
+    use tauri_plugin_updater::UpdaterExt;
+    let current_version = app.package_info().version.to_string();
+
+    match app.updater() {
+        Ok(updater) => match updater.check().await {
+            Ok(Some(update)) => Ok(AppUpdateMetadata {
+                available: true,
+                current_version,
+                latest_version: Some(update.version.clone()),
+                body: update.body.clone(),
+                date: update.date.map(|d| d.to_string()),
+            }),
+            Ok(None) => Ok(AppUpdateMetadata {
+                available: false,
+                current_version,
+                latest_version: None,
+                body: None,
+                date: None,
+            }),
+            Err(e) => {
+                tracing::warn!("Failed to check for updates: {}", e);
+                Ok(AppUpdateMetadata {
+                    available: false,
+                    current_version,
+                    latest_version: None,
+                    body: None,
+                    date: None,
+                })
+            }
+        },
+        Err(e) => {
+            tracing::warn!("Updater not configured: {}", e);
+            Ok(AppUpdateMetadata {
+                available: false,
+                current_version,
+                latest_version: None,
+                body: None,
+                date: None,
+            })
+        }
+    }
+}
+
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle) -> Result<()> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| AppError::Internal(e.to_string()))?;
+    if let Some(update) = updater.check().await.map_err(|e| AppError::Internal(e.to_string()))? {
+        update
+            .download_and_install(|_chunk, _total| {}, || {})
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        app.restart();
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db_path = StorageService::default_db_path();
@@ -357,10 +456,26 @@ pub fn run() {
     });
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            tracing::info!("Single instance notification received: {:?}", argv);
+            let has_new_window_arg = argv.iter().any(|arg| arg == "--new-window" || arg == "-n");
+            if has_new_window_arg {
+                let _ = open_new_window(app);
+            } else if let Some(window) = app.webview_windows().values().next() {
+                let _ = window.show();
+                let _ = window.set_focus();
+            } else {
+                let _ = open_new_window(app);
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             ping,
+            create_new_window,
+            check_update,
+            install_update,
             get_servers,
             save_server,
             delete_server,
@@ -375,6 +490,7 @@ pub fn run() {
             disconnect_server,
             reconnect_server,
             get_connection_state,
+            get_all_connection_states,
             sftp_read_dir,
             sftp_read_file,
             sftp_write_file,

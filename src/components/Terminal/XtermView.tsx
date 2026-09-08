@@ -2,7 +2,8 @@ import React, { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
+import { safeInvoke } from "../../utils/tauriBridge";
 import { TerminalSession, useTerminalStore } from "../../stores/terminalStore";
 
 interface XtermViewProps {
@@ -51,6 +52,14 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       },
     });
 
+    // Prevent IME Enter key (confirming phonetic letters) from emitting Carriage Return (\r)
+    term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+      if (event.isComposing && (event.key === "Enter" || event.keyCode === 13)) {
+        return false;
+      }
+      return true;
+    });
+
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(containerRef.current);
@@ -69,6 +78,49 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
 
     let isDisposed = false;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    let textareaClearTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Track IME composition lifecycle to guard against duplicate input emissions
+    let isComposing = false;
+    let lastCompositionEndTime = 0;
+    let lastComposedText = "";
+    let lastSentData = "";
+    let lastSentTime = 0;
+
+    const textarea = term.textarea;
+    const handleCompositionStart = () => {
+      isComposing = true;
+      if (textareaClearTimer) {
+        clearTimeout(textareaClearTimer);
+        textareaClearTimer = null;
+      }
+    };
+
+    const handleCompositionUpdate = () => {
+      isComposing = true;
+    };
+
+    const handleCompositionEnd = (e: CompositionEvent) => {
+      isComposing = false;
+      lastCompositionEndTime = performance.now();
+      lastComposedText = e.data || "";
+
+      // Schedule safe clearing of the hidden textarea value once xterm's microtask tick completes.
+      // This eliminates stale character residue accumulation which causes duplicate diff emissions
+      // and multi-word repetitions ("有时候还输入很多").
+      if (textareaClearTimer) clearTimeout(textareaClearTimer);
+      textareaClearTimer = setTimeout(() => {
+        if (textarea && !isComposing) {
+          textarea.value = "";
+        }
+      }, 10);
+    };
+
+    if (textarea) {
+      textarea.addEventListener("compositionstart", handleCompositionStart);
+      textarea.addEventListener("compositionupdate", handleCompositionUpdate);
+      textarea.addEventListener("compositionend", handleCompositionEnd);
+    }
 
     // Channel for high throughput binary output from PTY
     const channel = new Channel<number[] | Uint8Array>();
@@ -81,7 +133,7 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
     updateSessionStatus(session.id, "connecting");
 
     // Open remote terminal session in Tokio backend
-    invoke<string>("terminal_open", {
+    safeInvoke<string>("terminal_open", {
       serverId: session.serverId,
       cols: term.cols || 80,
       rows: term.rows || 24,
@@ -91,18 +143,43 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
     })
       .then((backendId) => {
         if (isDisposed) {
-          invoke("terminal_close", { sessionId: backendId }).catch(console.error);
+          safeInvoke("terminal_close", { sessionId: backendId }).catch(console.error);
           return;
         }
         backendSessionIdRef.current = backendId;
         updateSessionStatus(session.id, "connected");
 
-        // Send user input to backend
+        // Send user input to backend with high-precision IME deduplication
         term.onData(async (inputData) => {
-          if (!backendSessionIdRef.current) return;
+          if (!backendSessionIdRef.current || !inputData) return;
+
+          const now = performance.now();
+          const timeSinceComposition = now - lastCompositionEndTime;
+          const timeSinceLastSend = now - lastSentTime;
+
+          // High-precision IME deduplication guard:
+          // If we are currently composing or within 150ms of composition end,
+          // and the exact same input string is received within 100ms, it is a duplicate
+          // fired by xterm's dual input path (_inputEvent + CompositionHelper). Drop it!
+          // We also verify that the inputData matches the composed text or is CJK/multi-character,
+          // ensuring single-key English rapid double typing (e.g. 'll' in 'hello') is never affected.
+          const isRecentComposition = isComposing || timeSinceComposition < 150;
+          const isCjkOrMultiChar = inputData.length > 1 || /[^\x00-\x7F]/.test(inputData);
+          if (
+            isRecentComposition &&
+            inputData === lastSentData &&
+            timeSinceLastSend < 100 &&
+            (inputData === lastComposedText || isCjkOrMultiChar)
+          ) {
+            return;
+          }
+
+          lastSentData = inputData;
+          lastSentTime = now;
+
           try {
             const bytes = Array.from(new TextEncoder().encode(inputData));
-            await invoke("terminal_write", {
+            await safeInvoke("terminal_write", {
               sessionId: backendSessionIdRef.current,
               data: bytes,
             });
@@ -127,7 +204,7 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
         if (currentTerm && currentBackendId && currentTerm.cols > 0 && currentTerm.rows > 0) {
           if (resizeTimer) clearTimeout(resizeTimer);
           resizeTimer = setTimeout(() => {
-            invoke("terminal_resize", {
+            safeInvoke("terminal_resize", {
               sessionId: currentBackendId,
               cols: currentTerm.cols,
               rows: currentTerm.rows,
@@ -144,10 +221,16 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
     return () => {
       isDisposed = true;
       if (resizeTimer) clearTimeout(resizeTimer);
+      if (textareaClearTimer) clearTimeout(textareaClearTimer);
+      if (textarea) {
+        textarea.removeEventListener("compositionstart", handleCompositionStart);
+        textarea.removeEventListener("compositionupdate", handleCompositionUpdate);
+        textarea.removeEventListener("compositionend", handleCompositionEnd);
+      }
       resizeObserver.disconnect();
       const currentBackendId = backendSessionIdRef.current;
       if (currentBackendId) {
-        invoke("terminal_close", { sessionId: currentBackendId }).catch(console.error);
+        safeInvoke("terminal_close", { sessionId: currentBackendId }).catch(console.error);
       }
       term.dispose();
       termRef.current = null;

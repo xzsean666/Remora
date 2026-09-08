@@ -8,20 +8,24 @@ import { useLayoutStore } from "../../stores/layoutStore";
 export const TerminalTabBar: React.FC = () => {
   const { sessions, activeSessionId, setActiveSession, removeSession, addSession } = useTerminalStore();
   const { currentServerId, rootPath } = useFileTreeStore();
-  const { connectedServerProxy } = useConnectionStore();
+  const { connectedServerProxy, activeServerId, connectedServerName } = useConnectionStore();
   const { toggleTerminal } = useLayoutStore();
 
+  const effectiveServerId = activeServerId || currentServerId;
+
   const handleCreateTerminal = () => {
-    if (!currentServerId) {
-      alert("Please connect to an SSH server first.");
+    if (!effectiveServerId) {
+      alert("Please connect to an SSH server and activate it first.");
       return;
     }
 
     const nextIndex = sessions.length + 1;
+    const srvLabel = connectedServerName ? `[${connectedServerName}] ` : "";
     const newSession = {
       id: `term-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      title: `${nextIndex}: bash`,
-      serverId: currentServerId,
+      title: `${srvLabel}${nextIndex}: bash`,
+      serverId: effectiveServerId,
+      serverName: connectedServerName || undefined,
       initialDir: rootPath || undefined,
       remoteProxy: connectedServerProxy || undefined,
       status: "connecting" as const,
@@ -31,7 +35,7 @@ export const TerminalTabBar: React.FC = () => {
   };
 
   return (
-    <div className="h-8 px-2 bg-vscode-sidebar/90 flex items-center justify-between border-b border-vscode-border text-xs select-none">
+    <div className="h-8 px-2 bg-vscode-sidebar/90 flex items-center justify-between border-b border-vscode-border text-xs select-none flex-shrink-0">
       {/* Left: Terminal Tabs */}
       <div className="flex items-center gap-1 overflow-x-auto scrollbar-none flex-1 min-w-0">
         <div className="flex items-center gap-1.5 font-semibold text-vscode-textBright uppercase tracking-wider text-[11px] mr-2 flex-shrink-0">
@@ -62,7 +66,7 @@ export const TerminalTabBar: React.FC = () => {
                 }`}
               />
 
-              <span className="truncate max-w-[100px]">{session.title}</span>
+              <span className="truncate max-w-[140px]" title={session.title}>{session.title}</span>
 
               {session.remoteProxy && (
                 <span title={`Remote Proxy: ${session.remoteProxy}`}>
