@@ -25,11 +25,12 @@ interface ConnectionStateEvent {
 interface ConnectionState {
   connectedServerId: string | null;
   connectedServerName: string | null;
+  connectedServerProxy: string | null;
   status: ConnectionStatus;
   reconnectAttempt: number;
   errorMessage: string | null;
 
-  setConnectedServer: (id: string | null, name?: string | null) => void;
+  setConnectedServer: (id: string | null, name?: string | null, proxy?: string | null) => void;
   reconnect: (serverId?: string) => Promise<void>;
   initListener: () => Promise<() => void>;
 }
@@ -37,14 +38,16 @@ interface ConnectionState {
 export const useConnectionStore = create<ConnectionState>((set, get) => ({
   connectedServerId: null,
   connectedServerName: null,
+  connectedServerProxy: null,
   status: "disconnected",
   reconnectAttempt: 0,
   errorMessage: null,
 
-  setConnectedServer: (id, name = null) => {
+  setConnectedServer: (id, name = null, proxy = null) => {
     set({
       connectedServerId: id,
       connectedServerName: name,
+      connectedServerProxy: proxy,
       status: id ? "connected" : "disconnected",
       reconnectAttempt: 0,
       errorMessage: null,

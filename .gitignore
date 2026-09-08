@@ -8,8 +8,9 @@ dist-ssr/
 src-tauri/target/
 Cargo.lock
 
-# Tauri
+# Tauri & Release
 src-tauri/gen/
+release/
 
 # Logs
 logs

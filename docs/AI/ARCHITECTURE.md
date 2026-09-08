@@ -111,6 +111,15 @@
   - 前端计算鼠标悬停在 Explorer 树中的具体文件夹节点，得到目标 `remote_target_dir`。
   - 后端 Rust 任务以异步非阻塞形式递归创建远程文件夹并上传文件，同时显示在 Transfer 面板。
 
+### 优化 8: 远程服务器代理配置与终端环境变量自动注入 (Remote Proxy Injection)
+- **挑战**: 许多开发服务器本地（127.0.0.1）部署了 VPN/代理（例如 1080/7890 端口），用户在远程打开终端拉取代码、下载依赖包或请求外部 API 时需要走远程本机的代理；同时 Docker 容器间通讯、内部私有服务及本地局域网通讯绝不能走代理，否则会导致容器网络断连或本地访问失败。
+- **架构方案**:
+  - **服务器粒度持久化**: 在 `ServerConfig` 中增加 `remote_proxy` 与 `remote_no_proxy`，由 SQLite 持久化并平滑向下兼容迁移。
+  - **自动补全与协议支持**: 支持用户输入 `127.0.0.1:1080`（自动补全 `http://`）或完整 URL 如 `http://127.0.0.1:7890`、`socks5://127.0.0.1:1080`。
+  - **丰富默认 No Proxy 白名单**: 默认内置并预填包含 Docker 全段私网 (`172.16.0.0/12`)、企业局域网 (`10.0.0.0/8`, `192.168.0.0/16`)、IPv4/IPv6 本地回环 (`localhost,127.0.0.1,::1`) 及内部域名 (`*.local,.internal`) 的完整名单，并支持用户按需自定义。
+  - **安全注入与环境规范**: 在交互式 PTY Shell 启动成功后，自动注入大小写全套标准环境变量：`http_proxy`、`https_proxy`、`all_proxy`、`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 以及 `no_proxy`、`NO_PROXY`。
+  - **友好即时反馈**: 结合 `cd` 初始工作区与 `clear` 清屏后，通过 POSIX 兼容的 `printf` 打印青色高亮提示（`[Remora] Remote proxy active: <proxy>`），终端标签栏展示 Globe 图标与 Tooltip。
+
 ---
 
 ## 3. 技术栈选型

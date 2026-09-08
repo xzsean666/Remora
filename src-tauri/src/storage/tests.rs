@@ -17,6 +17,8 @@ mod tests {
             auth_type: AuthType::Password,
             key_path: None,
             default_workspace: Some("/var/www".to_string()),
+            remote_proxy: Some("127.0.0.1:1080".to_string()),
+            remote_no_proxy: Some("localhost,127.0.0.1,172.16.0.0/12".to_string()),
             created_at: 1000,
             updated_at: 1000,
         };
@@ -31,15 +33,21 @@ mod tests {
         assert_eq!(fetched.name, "Test Server");
         assert_eq!(fetched.host, "192.168.1.100");
         assert_eq!(fetched.auth_type, AuthType::Password);
+        assert_eq!(fetched.remote_proxy, Some("127.0.0.1:1080".to_string()));
+        assert_eq!(fetched.remote_no_proxy, Some("localhost,127.0.0.1,172.16.0.0/12".to_string()));
 
         // 3. Update
         let mut updated = server.clone();
         updated.name = "Renamed Server".to_string();
+        updated.remote_proxy = Some("socks5://127.0.0.1:1080".to_string());
+        updated.remote_no_proxy = Some("localhost,10.0.0.0/8".to_string());
         updated.updated_at = 2000;
         storage.save_server(&updated).expect("update server failed");
 
         let fetched_updated = storage.get_server("srv-1").unwrap().unwrap();
         assert_eq!(fetched_updated.name, "Renamed Server");
+        assert_eq!(fetched_updated.remote_proxy, Some("socks5://127.0.0.1:1080".to_string()));
+        assert_eq!(fetched_updated.remote_no_proxy, Some("localhost,10.0.0.0/8".to_string()));
         assert_eq!(fetched_updated.updated_at, 2000);
 
         // 4. List

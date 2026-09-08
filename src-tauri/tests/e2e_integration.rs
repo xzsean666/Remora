@@ -24,6 +24,8 @@ async fn test_e2e_full_stack_lifecycle() {
         auth_type: AuthType::Password,
         key_path: None,
         default_workspace: Some("/home/developer/workspace".to_string()),
+        remote_proxy: Some("http://127.0.0.1:1080".to_string()),
+        remote_no_proxy: Some("localhost,127.0.0.1,172.16.0.0/12".to_string()),
         created_at: 1000,
         updated_at: 1000,
     };
@@ -32,7 +34,10 @@ async fn test_e2e_full_stack_lifecycle() {
     storage.save_server(&server).expect("Failed to save server");
     let loaded_server = storage.get_server(server_id).expect("Failed to get server");
     assert!(loaded_server.is_some());
-    assert_eq!(loaded_server.unwrap().name, "E2E Production Server");
+    let unwrapped = loaded_server.unwrap();
+    assert_eq!(unwrapped.name, "E2E Production Server");
+    assert_eq!(unwrapped.remote_proxy, Some("http://127.0.0.1:1080".to_string()));
+    assert_eq!(unwrapped.remote_no_proxy, Some("localhost,127.0.0.1,172.16.0.0/12".to_string()));
 
     // Save credentials to Keyring
     keyring.set_secret(server_id, "super_secure_password").expect("Failed to set secret");

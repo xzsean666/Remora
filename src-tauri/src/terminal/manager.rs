@@ -25,6 +25,8 @@ impl TerminalManager {
         cols: u32,
         rows: u32,
         initial_dir: Option<String>,
+        remote_proxy: Option<String>,
+        remote_no_proxy: Option<String>,
         on_data: TauriChannel<Vec<u8>>,
     ) -> Result<String> {
         let session = TerminalSession::start(
@@ -32,6 +34,8 @@ impl TerminalManager {
             cols,
             rows,
             initial_dir,
+            remote_proxy,
+            remote_no_proxy,
             on_data,
             self.connection.clone(),
         )

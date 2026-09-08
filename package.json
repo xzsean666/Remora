@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "release": "./build.sh"
   },
   "dependencies": {
     "@codemirror/commands": "^6.8.0",

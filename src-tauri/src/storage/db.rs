@@ -51,6 +51,8 @@ impl StorageService {
                 auth_type TEXT NOT NULL,
                 key_path TEXT,
                 default_workspace TEXT,
+                remote_proxy TEXT,
+                remote_no_proxy TEXT,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
@@ -70,6 +72,11 @@ impl StorageService {
             );
             "#,
         )?;
+
+        // Graceful migration for existing databases without proxy columns
+        let _ = conn.execute("ALTER TABLE servers ADD COLUMN remote_proxy TEXT", []);
+        let _ = conn.execute("ALTER TABLE servers ADD COLUMN remote_no_proxy TEXT", []);
+
         Ok(())
     }
 
@@ -78,7 +85,7 @@ impl StorageService {
     pub fn get_servers(&self) -> Result<Vec<ServerConfig>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, host, port, username, auth_type, key_path, default_workspace, created_at, updated_at
+            "SELECT id, name, host, port, username, auth_type, key_path, default_workspace, remote_proxy, remote_no_proxy, created_at, updated_at
              FROM servers ORDER BY updated_at DESC",
         )?;
 
@@ -93,8 +100,10 @@ impl StorageService {
                 auth_type: AuthType::from_str(&auth_type_str),
                 key_path: row.get(6)?,
                 default_workspace: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                remote_proxy: row.get(8)?,
+                remote_no_proxy: row.get(9)?,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
             })
         })?;
 
@@ -108,7 +117,7 @@ impl StorageService {
     pub fn get_server(&self, id: &str) -> Result<Option<ServerConfig>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, host, port, username, auth_type, key_path, default_workspace, created_at, updated_at
+            "SELECT id, name, host, port, username, auth_type, key_path, default_workspace, remote_proxy, remote_no_proxy, created_at, updated_at
              FROM servers WHERE id = ?1",
         )?;
 
@@ -124,8 +133,10 @@ impl StorageService {
                     auth_type: AuthType::from_str(&auth_type_str),
                     key_path: row.get(6)?,
                     default_workspace: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
+                    remote_proxy: row.get(8)?,
+                    remote_no_proxy: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
                 })
             })
             .optional()?;
@@ -137,8 +148,8 @@ impl StorageService {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             r#"
-            INSERT INTO servers (id, name, host, port, username, auth_type, key_path, default_workspace, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            INSERT INTO servers (id, name, host, port, username, auth_type, key_path, default_workspace, remote_proxy, remote_no_proxy, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 host = excluded.host,
@@ -147,6 +158,8 @@ impl StorageService {
                 auth_type = excluded.auth_type,
                 key_path = excluded.key_path,
                 default_workspace = excluded.default_workspace,
+                remote_proxy = excluded.remote_proxy,
+                remote_no_proxy = excluded.remote_no_proxy,
                 updated_at = excluded.updated_at
             "#,
             params![
@@ -158,6 +171,8 @@ impl StorageService {
                 server.auth_type.as_str(),
                 server.key_path,
                 server.default_workspace,
+                server.remote_proxy,
+                server.remote_no_proxy,
                 server.created_at,
                 server.updated_at,
             ],

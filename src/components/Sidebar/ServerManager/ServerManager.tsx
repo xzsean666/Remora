@@ -10,9 +10,15 @@ import {
   Key,
   Lock,
   Loader2,
+  Globe,
+  Pencil,
+  ShieldCheck,
 } from "lucide-react";
 import { useFileTreeStore } from "../../../stores/fileTreeStore";
 import { useConnectionStore } from "../../../stores/connectionStore";
+
+export const DEFAULT_NO_PROXY =
+  "localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,172.17.0.0/16,172.18.0.0/16,172.19.0.0/16,172.20.0.0/16,192.168.0.0/16,*.local,.internal,host.docker.internal";
 
 export interface ServerConfig {
   id: string;
@@ -23,6 +29,8 @@ export interface ServerConfig {
   auth_type: "password" | "private_key" | "agent";
   key_path?: string;
   default_workspace?: string;
+  remote_proxy?: string;
+  remote_no_proxy?: string;
   created_at: number;
   updated_at: number;
 }
@@ -32,6 +40,7 @@ export const ServerManager: React.FC = () => {
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [connectingId, setConnectingId] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingServerId, setEditingServerId] = useState<string | null>(null);
 
   // Form states
   const [name, setName] = useState("");
@@ -42,6 +51,8 @@ export const ServerManager: React.FC = () => {
   const [keyPath, setKeyPath] = useState("");
   const [secret, setSecret] = useState("");
   const [workspace, setWorkspace] = useState("/root");
+  const [remoteProxy, setRemoteProxy] = useState("");
+  const [remoteNoProxy, setRemoteNoProxy] = useState(DEFAULT_NO_PROXY);
 
   const { setRoot } = useFileTreeStore();
   const { setConnectedServer } = useConnectionStore();
@@ -60,6 +71,7 @@ export const ServerManager: React.FC = () => {
   }, []);
 
   const resetForm = () => {
+    setEditingServerId(null);
     setName("");
     setHost("");
     setPort(22);
@@ -68,6 +80,27 @@ export const ServerManager: React.FC = () => {
     setKeyPath("");
     setSecret("");
     setWorkspace("/root");
+    setRemoteProxy("");
+    setRemoteNoProxy(DEFAULT_NO_PROXY);
+  };
+
+  const handleEdit = (srv: ServerConfig) => {
+    setEditingServerId(srv.id);
+    setName(srv.name);
+    setHost(srv.host);
+    setPort(srv.port);
+    setUsername(srv.username);
+    setAuthType(srv.auth_type);
+    setKeyPath(srv.key_path || "");
+    setSecret(""); // Keep existing password in keyring unless re-entered
+    setWorkspace(srv.default_workspace || "");
+    setRemoteProxy(srv.remote_proxy || "");
+    setRemoteNoProxy(
+      srv.remote_no_proxy !== undefined && srv.remote_no_proxy !== null
+        ? srv.remote_no_proxy
+        : DEFAULT_NO_PROXY
+    );
+    setShowAddModal(true);
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -77,8 +110,9 @@ export const ServerManager: React.FC = () => {
       return;
     }
 
+    const existingServer = editingServerId ? servers.find((s) => s.id === editingServerId) : null;
     const newServer: ServerConfig = {
-      id: `srv-${Date.now()}`,
+      id: editingServerId || `srv-${Date.now()}`,
       name,
       host,
       port: Number(port) || 22,
@@ -86,7 +120,9 @@ export const ServerManager: React.FC = () => {
       auth_type: authType,
       key_path: authType === "private_key" && keyPath ? keyPath : undefined,
       default_workspace: workspace || undefined,
-      created_at: Date.now(),
+      remote_proxy: remoteProxy.trim() ? remoteProxy.trim() : undefined,
+      remote_no_proxy: remoteNoProxy.trim() ? remoteNoProxy.trim() : undefined,
+      created_at: existingServer ? existingServer.created_at : Date.now(),
       updated_at: Date.now(),
     };
 
@@ -108,7 +144,7 @@ export const ServerManager: React.FC = () => {
     try {
       await invoke("connect_server", { serverId: srv.id });
       setActiveServerId(srv.id);
-      setConnectedServer(srv.id, srv.name);
+      setConnectedServer(srv.id, srv.name, srv.remote_proxy);
       if (srv.default_workspace) {
         await setRoot(srv.id, srv.default_workspace);
       }
@@ -199,6 +235,14 @@ export const ServerManager: React.FC = () => {
                   )}
 
                   <button
+                    onClick={() => handleEdit(srv)}
+                    title="Edit Server"
+                    className="p-1 text-vscode-textMuted hover:text-white rounded"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+
+                  <button
                     onClick={() => handleDelete(srv.id)}
                     title="Delete Server"
                     className="p-1 text-vscode-textMuted hover:text-rose-400 rounded"
@@ -214,6 +258,15 @@ export const ServerManager: React.FC = () => {
                   {srv.auth_type}
                 </span>
               </div>
+
+              {srv.remote_proxy && (
+                <div className="text-[10px] text-sky-400/90 flex items-center gap-1 font-mono">
+                  <Globe className="w-3 h-3 text-sky-400 flex-shrink-0" />
+                  <span className="truncate" title={`Remote proxy: ${srv.remote_proxy}`}>
+                    Proxy: {srv.remote_proxy}
+                  </span>
+                </div>
+              )}
 
               {isConnected && srv.default_workspace && (
                 <button
@@ -246,7 +299,9 @@ export const ServerManager: React.FC = () => {
       {showAddModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-vscode-sidebar border border-vscode-border rounded-xl shadow-2xl p-4 flex flex-col gap-3 text-vscode-text">
-            <h2 className="text-sm font-semibold text-vscode-textBright">Add SSH Server</h2>
+            <h2 className="text-sm font-semibold text-vscode-textBright">
+              {editingServerId ? "Edit SSH Server" : "Add SSH Server"}
+            </h2>
 
             <form onSubmit={handleSave} className="flex flex-col gap-2.5">
               <div>
@@ -313,7 +368,7 @@ export const ServerManager: React.FC = () => {
                   </label>
                   <input
                     type="password"
-                    placeholder="Password"
+                    placeholder={editingServerId ? "Leave blank to keep existing password" : "Password"}
                     value={secret}
                     onChange={(e) => setSecret(e.target.value)}
                     className="w-full bg-vscode-bg border border-vscode-border rounded px-2 py-1 text-xs outline-none focus:border-vscode-activityBarActive"
@@ -338,7 +393,7 @@ export const ServerManager: React.FC = () => {
                     <label className="text-[11px] text-vscode-textMuted block mb-1">Passphrase (Optional)</label>
                     <input
                       type="password"
-                      placeholder="Key Passphrase"
+                      placeholder={editingServerId ? "Leave blank to keep existing passphrase" : "Key Passphrase"}
                       value={secret}
                       onChange={(e) => setSecret(e.target.value)}
                       className="w-full bg-vscode-bg border border-vscode-border rounded px-2 py-1 text-xs outline-none focus:border-vscode-activityBarActive"
@@ -357,10 +412,43 @@ export const ServerManager: React.FC = () => {
                 />
               </div>
 
+              <div>
+                <label className="text-[11px] text-vscode-textMuted block mb-1 flex items-center gap-1">
+                  <Globe className="w-3 h-3 text-sky-400" /> Remote Proxy (Optional)
+                </label>
+                <input
+                  placeholder="e.g. 127.0.0.1:1080 or http://127.0.0.1:1080"
+                  value={remoteProxy}
+                  onChange={(e) => setRemoteProxy(e.target.value)}
+                  className="w-full bg-vscode-bg border border-vscode-border rounded px-2 py-1 text-xs outline-none focus:border-vscode-activityBarActive font-mono"
+                />
+                <p className="text-[10px] text-vscode-textMuted/70 mt-0.5">
+                  Injected into remote terminal (http_proxy, https_proxy & all_proxy)
+                </p>
+              </div>
+
+              <div>
+                <label className="text-[11px] text-vscode-textMuted block mb-1 flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3 text-emerald-400" /> No Proxy (Bypass List)
+                </label>
+                <input
+                  placeholder={DEFAULT_NO_PROXY}
+                  value={remoteNoProxy}
+                  onChange={(e) => setRemoteNoProxy(e.target.value)}
+                  className="w-full bg-vscode-bg border border-vscode-border rounded px-2 py-1 text-xs outline-none focus:border-vscode-activityBarActive font-mono text-[11px]"
+                />
+                <p className="text-[10px] text-vscode-textMuted/70 mt-0.5">
+                  Pre-filled: Docker (172.16.0.0/12), LAN (10.0.0.0/8, 192.168.0.0/16), loopback & *.local
+                </p>
+              </div>
+
               <div className="flex justify-end gap-2 mt-3">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={() => {
+                    resetForm();
+                    setShowAddModal(false);
+                  }}
                   className="px-3 py-1.5 rounded hover:bg-vscode-hover text-xs"
                 >
                   Cancel
@@ -369,7 +457,7 @@ export const ServerManager: React.FC = () => {
                   type="submit"
                   className="px-3 py-1.5 rounded bg-vscode-activityBarActive text-white text-xs hover:brightness-110 font-medium"
                 >
-                  Save Server
+                  {editingServerId ? "Update Server" : "Save Server"}
                 </button>
               </div>
             </form>

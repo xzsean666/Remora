@@ -1,12 +1,14 @@
 import React from "react";
-import { Terminal, Plus, X } from "lucide-react";
+import { Terminal, Plus, X, Globe } from "lucide-react";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
+import { useConnectionStore } from "../../stores/connectionStore";
 import { useLayoutStore } from "../../stores/layoutStore";
 
 export const TerminalTabBar: React.FC = () => {
   const { sessions, activeSessionId, setActiveSession, removeSession, addSession } = useTerminalStore();
   const { currentServerId, rootPath } = useFileTreeStore();
+  const { connectedServerProxy } = useConnectionStore();
   const { toggleTerminal } = useLayoutStore();
 
   const handleCreateTerminal = () => {
@@ -21,6 +23,7 @@ export const TerminalTabBar: React.FC = () => {
       title: `${nextIndex}: bash`,
       serverId: currentServerId,
       initialDir: rootPath || undefined,
+      remoteProxy: connectedServerProxy || undefined,
       status: "connecting" as const,
     };
 
@@ -60,6 +63,12 @@ export const TerminalTabBar: React.FC = () => {
               />
 
               <span className="truncate max-w-[100px]">{session.title}</span>
+
+              {session.remoteProxy && (
+                <span title={`Remote Proxy: ${session.remoteProxy}`}>
+                  <Globe className="w-2.5 h-2.5 text-sky-400 flex-shrink-0" />
+                </span>
+              )}
 
               {/* Close session button */}
               <button

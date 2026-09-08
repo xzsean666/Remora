@@ -21,20 +21,23 @@
 | **TASK-010** | 后台文件传输管理器 (TransferManager) 与拖拽上传 | TASK-004, TASK-007 | **DONE** | `docs/AI/tasks/TASK-010.md` |
 | **TASK-011** | SSH 断线自动重连联动、终端恢复与防丢码冲突检测 | TASK-003, TASK-008, TASK-009 | **DONE** | `docs/AI/tasks/TASK-011.md` |
 | **TASK-012** | 全流程端到端集成测试、性能基准与打包校验 | TASK-001 ~ TASK-011 | **DONE** | `docs/AI/tasks/TASK-012.md` |
+| **TASK-013** | 远程服务器代理配置与终端环境变量自动注入 | TASK-002, TASK-005, TASK-009, TASK-012 | **DONE** | `docs/AI/tasks/TASK-013.md` |
+| **TASK-014** | 远程代理 No Proxy (Bypass List) 默认内置扩展与配置支持 | TASK-013 | **DONE** | `docs/AI/tasks/TASK-014.md` |
+| **TASK-015** | 跨平台自动化 Release 构建脚本 (build.sh) 与打包产物分发目录支持 | TASK-014 | **DONE** | `docs/AI/tasks/TASK-015.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 13
+- **已完成 (DONE)**: 16
 - **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 13
+- **总任务数**: 16
 
 ---
 
 ## 3. 项目执行总结
 
 - **所有任务已全部圆满完成 (100% DONE)**！
-- Remora MVP 核心功能、前后端集成、端到端测试套件与生产 Release 校验全部就绪。
+- Remora 核心功能、远程代理注入、前后端集成、自动化构建发布体系 (`build.sh`) 与打包校验全部就绪。

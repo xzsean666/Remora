@@ -29,6 +29,8 @@ mod tests {
             auth_type: AuthType::Password,
             key_path: None,
             default_workspace: None,
+            remote_proxy: None,
+            remote_no_proxy: None,
             created_at: 0,
             updated_at: 0,
         };

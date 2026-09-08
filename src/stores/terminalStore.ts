@@ -6,6 +6,7 @@ export interface TerminalSession {
   serverId: string;
   serverName?: string;
   initialDir?: string;
+  remoteProxy?: string;
   status: "connecting" | "connected" | "disconnected" | "closed";
 }
 

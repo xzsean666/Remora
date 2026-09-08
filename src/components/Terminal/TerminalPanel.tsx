@@ -2,12 +2,14 @@ import React from "react";
 import { Terminal as TerminalIcon, Plus } from "lucide-react";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
+import { useConnectionStore } from "../../stores/connectionStore";
 import { TerminalTabBar } from "./TerminalTabBar";
 import { XtermView } from "./XtermView";
 
 export const TerminalPanel: React.FC = () => {
   const { sessions, activeSessionId, addSession } = useTerminalStore();
   const { currentServerId, rootPath } = useFileTreeStore();
+  const { connectedServerProxy } = useConnectionStore();
 
   const handleCreateTerminal = () => {
     if (!currentServerId) return;
@@ -18,6 +20,7 @@ export const TerminalPanel: React.FC = () => {
       title: `${nextIndex}: bash`,
       serverId: currentServerId,
       initialDir: rootPath || undefined,
+      remoteProxy: connectedServerProxy || undefined,
       status: "connecting" as const,
     };
 

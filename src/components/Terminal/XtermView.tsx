@@ -86,6 +86,7 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       cols: term.cols || 80,
       rows: term.rows || 24,
       initialDir: session.initialDir || null,
+      remoteProxy: session.remoteProxy || null,
       onData: channel,
     })
       .then((backendId) => {
@@ -152,7 +153,7 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       termRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [session.id, session.serverId, session.initialDir, updateSessionStatus]);
+  }, [session.id, session.serverId, session.initialDir, session.remoteProxy, updateSessionStatus]);
 
   // Fit and focus when switching to active tab
   useEffect(() => {

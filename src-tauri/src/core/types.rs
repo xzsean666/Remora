@@ -37,6 +37,8 @@ pub struct ServerConfig {
     pub auth_type: AuthType,
     pub key_path: Option<String>,
     pub default_workspace: Option<String>,
+    pub remote_proxy: Option<String>,
+    pub remote_no_proxy: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
