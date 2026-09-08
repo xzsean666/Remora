@@ -1,8 +1,10 @@
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use russh::ChannelMsg;
 use russh::client::Msg;
 use tauri::ipc::Channel as TauriChannel;
+use tauri::Emitter;
 use tracing::{info, warn};
 use crate::connection::ConnectionManager;
 use crate::core::{AppError, Result};
@@ -80,13 +82,23 @@ impl TerminalSession {
         remote_no_proxy: Option<String>,
         on_data: TauriChannel<Vec<u8>>,
         connection: Arc<ConnectionManager>,
+        app_handle: Option<tauri::AppHandle>,
     ) -> Result<Self> {
         let id = format!("term-{}", uuid::Uuid::new_v4());
-        let channel = connection.open_channel(server_id).await?;
+        let channel = match tokio::time::timeout(
+            Duration::from_secs(10),
+            connection.open_channel(server_id),
+        )
+        .await
+        {
+            Ok(res) => res?,
+            Err(_) => return Err(AppError::Terminal("Timed out opening SSH channel (10s)".to_string())),
+        };
 
-        // Request interactive PTY
-        channel
-            .request_pty(
+        // Request interactive PTY with timeout
+        match tokio::time::timeout(
+            Duration::from_secs(10),
+            channel.request_pty(
                 false,
                 "xterm-256color",
                 cols.max(10),
@@ -94,15 +106,21 @@ impl TerminalSession {
                 0,
                 0,
                 &[],
-            )
-            .await
-            .map_err(|e| AppError::Terminal(format!("Failed to request PTY: {}", e)))?;
+            ),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(AppError::Terminal(format!("Failed to request PTY: {}", e))),
+            Err(_) => return Err(AppError::Terminal("Timed out requesting PTY (10s)".to_string())),
+        }
 
-        // Request interactive shell
-        channel
-            .request_shell(true)
-            .await
-            .map_err(|e| AppError::Terminal(format!("Failed to request shell: {}", e)))?;
+        // Request interactive shell with timeout
+        match tokio::time::timeout(Duration::from_secs(10), channel.request_shell(true)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => return Err(AppError::Terminal(format!("Failed to request shell: {}", e))),
+            Err(_) => return Err(AppError::Terminal("Timed out requesting shell (10s)".to_string())),
+        }
 
         // Execute directory switch and proxy environment injection if configured
         if let Some(startup_cmd) = Self::build_startup_cmd(
@@ -110,7 +128,11 @@ impl TerminalSession {
             remote_proxy.as_deref(),
             remote_no_proxy.as_deref(),
         ) {
-            let _ = channel.data(startup_cmd.as_bytes()).await;
+            let _ = tokio::time::timeout(
+                Duration::from_secs(10),
+                channel.data(startup_cmd.as_bytes()),
+            )
+            .await;
         }
 
         let channel_arc = Arc::new(Mutex::new(channel));
@@ -118,6 +140,8 @@ impl TerminalSession {
 
         let ch_clone = channel_arc.clone();
         let session_id_clone = id.clone();
+        let server_id_clone = server_id.to_string();
+        let app_handle_clone = app_handle.clone();
 
         tokio::spawn(async move {
             info!("Terminal background task started for session {}", session_id_clone);
@@ -127,6 +151,14 @@ impl TerminalSession {
                         let ch = ch_clone.lock().await;
                         if let Err(e) = ch.data(input.as_slice()).await {
                             warn!("Terminal input write failed: {}", e);
+                            let _ = on_data.send(b"\r\n\x1b[33m[Remora] Terminal write failed (channel closed).\x1b[0m\r\n".to_vec());
+                            if let Some(ref app) = app_handle_clone {
+                                let _ = app.emit("terminal-session-closed", serde_json::json!({
+                                    "sessionId": session_id_clone,
+                                    "serverId": server_id_clone,
+                                    "reason": format!("Write failed: {}", e)
+                                }));
+                            }
                             break;
                         }
                     }
@@ -148,6 +180,14 @@ impl TerminalSession {
                             }
                             Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => {
                                 info!("Terminal session {} closed by remote host", session_id_clone);
+                                let _ = on_data.send(b"\r\n\x1b[33m[Remora] Remote host closed the terminal session.\x1b[0m\r\n".to_vec());
+                                if let Some(ref app) = app_handle_clone {
+                                    let _ = app.emit("terminal-session-closed", serde_json::json!({
+                                        "sessionId": session_id_clone,
+                                        "serverId": server_id_clone,
+                                        "reason": "Remote host closed connection"
+                                    }));
+                                }
                                 break;
                             }
                             _ => {}
@@ -169,7 +209,7 @@ impl TerminalSession {
         self.tx_input
             .send(data)
             .await
-            .map_err(|e| AppError::Terminal(format!("Failed to queue terminal input: {}", e)))
+            .map_err(|e| AppError::Terminal(format!("Terminal session channel closed: {}", e)))
     }
 
     pub async fn resize(&self, cols: u32, rows: u32) -> Result<()> {

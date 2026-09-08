@@ -260,6 +260,7 @@ async fn terminal_open(
     remote_no_proxy: Option<String>,
     on_data: tauri::ipc::Channel<Vec<u8>>,
     state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
 ) -> Result<String> {
     let server_config = state.storage.get_server(&server_id).ok().flatten();
     let proxy = remote_proxy.or_else(|| server_config.as_ref().and_then(|s| s.remote_proxy.clone()));
@@ -267,7 +268,7 @@ async fn terminal_open(
 
     state
         .terminal
-        .open(&server_id, cols, rows, initial_dir, proxy, no_proxy, on_data)
+        .open(&server_id, cols, rows, initial_dir, proxy, no_proxy, on_data, Some(app))
         .await
 }
 

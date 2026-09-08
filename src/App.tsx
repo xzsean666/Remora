@@ -12,6 +12,7 @@ import { useLayoutStore } from "./stores/layoutStore";
 import { useEditorStore } from "./stores/editorStore";
 import { useFileTreeStore } from "./stores/fileTreeStore";
 import { useConnectionStore } from "./stores/connectionStore";
+import { useTerminalStore } from "./stores/terminalStore";
 import { createNewWindow, checkUpdate, installUpdate, type UpdateInfo } from "./utils/tauriBridge";
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
   const { currentServerId, rootPath, loadRecentProjects } = useFileTreeStore();
   const { openFile } = useEditorStore();
   const { initListener } = useConnectionStore();
+  const { initTerminalListener } = useTerminalStore();
 
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -38,9 +40,14 @@ export default function App() {
   useEffect(() => {
     initFromPreferences();
     loadRecentProjects();
-    let unlisten: (() => void) | null = null;
+    let unlistenConn: (() => void) | null = null;
+    let unlistenTerm: (() => void) | null = null;
+
     initListener().then((u) => {
-      unlisten = u;
+      unlistenConn = u;
+    });
+    initTerminalListener().then((u) => {
+      unlistenTerm = u;
     });
 
     // Global keyboard shortcut for New Window: Ctrl+Shift+N (or Cmd+Shift+N)
@@ -64,11 +71,12 @@ export default function App() {
     }, 3000);
 
     return () => {
-      if (unlisten) unlisten();
+      if (unlistenConn) unlistenConn();
+      if (unlistenTerm) unlistenTerm();
       window.removeEventListener("keydown", handleKeyDown);
       clearTimeout(timer);
     };
-  }, [initFromPreferences, initListener, loadRecentProjects]);
+  }, [initFromPreferences, initListener, initTerminalListener, loadRecentProjects]);
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-vscode-bg text-vscode-text select-none">

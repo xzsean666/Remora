@@ -241,6 +241,7 @@ export async function safeInvoke<T = any>(cmd: string, args?: Record<string, any
       const mockSessionId = `mock-term-${Date.now()}`;
       const onData = args?.onData;
       if (onData && typeof onData.send === "function") {
+        (window as any).__lastTerminalChannel = onData;
         setTimeout(() => {
           const banner =
             "\r\n\x1b[36m[Remora Web Preview]\x1b[0m Terminal session active.\r\n" +

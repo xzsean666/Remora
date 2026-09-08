@@ -72,4 +72,16 @@ mod tests {
         assert!(socks_cmd.contains("cd \"/var/www/html\""));
         assert!(socks_cmd.contains("printf \"\\033[36m[Remora] Remote proxy active: %s\\033[0m\\n\" \"socks5://127.0.0.1:1080\""));
     }
+
+    #[tokio::test]
+    async fn test_terminal_open_disconnected_server_fails_fast() {
+        let connection = Arc::new(ConnectionManager::new());
+        let terminal = TerminalManager::new(connection);
+
+        // Writing to non-existent session immediately returns error without hanging
+        let res = terminal.write("nonexistent-term", vec![1, 2, 3]).await;
+        assert!(res.is_err());
+        let err_msg = res.unwrap_err().to_string();
+        assert!(err_msg.contains("not found"));
+    }
 }

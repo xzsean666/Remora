@@ -1,12 +1,19 @@
 import React from "react";
-import { Terminal, Plus, X, Globe } from "lucide-react";
+import { Terminal, Plus, X, Globe, RotateCcw } from "lucide-react";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useLayoutStore } from "../../stores/layoutStore";
 
 export const TerminalTabBar: React.FC = () => {
-  const { sessions, activeSessionId, setActiveSession, removeSession, addSession } = useTerminalStore();
+  const {
+    sessions,
+    activeSessionId,
+    setActiveSession,
+    removeSession,
+    addSession,
+    reconnectSession,
+  } = useTerminalStore();
   const { currentServerId, rootPath } = useFileTreeStore();
   const { connectedServerProxy, activeServerId, connectedServerName } = useConnectionStore();
   const { toggleTerminal } = useLayoutStore();
@@ -45,6 +52,13 @@ export const TerminalTabBar: React.FC = () => {
 
         {sessions.map((session) => {
           const isActive = session.id === activeSessionId;
+          const statusTooltip =
+            session.status === "connected"
+              ? "Connected"
+              : session.status === "connecting"
+              ? "Connecting..."
+              : "Disconnected - Click to reconnect";
+
           return (
             <div
               key={session.id}
@@ -57,21 +71,44 @@ export const TerminalTabBar: React.FC = () => {
             >
               {/* Status indicator dot */}
               <span
-                className={`w-1.5 h-1.5 rounded-full ${
+                onClick={(e) => {
+                  if (session.status === "disconnected") {
+                    e.stopPropagation();
+                    reconnectSession(session.id);
+                  }
+                }}
+                title={statusTooltip}
+                className={`w-1.5 h-1.5 rounded-full transition-colors ${
                   session.status === "connected"
                     ? "bg-emerald-400"
                     : session.status === "connecting"
                     ? "bg-amber-400 animate-pulse"
-                    : "bg-red-400"
+                    : "bg-red-400 hover:scale-125 cursor-pointer"
                 }`}
               />
 
-              <span className="truncate max-w-[140px]" title={session.title}>{session.title}</span>
+              <span className="truncate max-w-[140px]" title={`${session.title} (${statusTooltip})`}>
+                {session.title}
+              </span>
 
               {session.remoteProxy && (
                 <span title={`Remote Proxy: ${session.remoteProxy}`}>
                   <Globe className="w-2.5 h-2.5 text-sky-400 flex-shrink-0" />
                 </span>
+              )}
+
+              {/* Reconnect session button when disconnected */}
+              {session.status === "disconnected" && (
+                <button
+                  title="Reconnect Terminal"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    reconnectSession(session.id);
+                  }}
+                  className="p-0.5 rounded text-amber-400 hover:text-amber-200 hover:bg-vscode-border transition-colors flex items-center justify-center"
+                >
+                  <RotateCcw className="w-2.5 h-2.5" />
+                </button>
               )}
 
               {/* Close session button */}

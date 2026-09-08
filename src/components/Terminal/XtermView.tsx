@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Channel } from "@tauri-apps/api/core";
+import { RotateCcw } from "lucide-react";
 import { safeInvoke } from "../../utils/tauriBridge";
 import { TerminalSession, useTerminalStore } from "../../stores/terminalStore";
 
@@ -16,7 +17,8 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const backendSessionIdRef = useRef<string | null>(null);
-  const { updateSessionStatus } = useTerminalStore();
+  const startSessionRef = useRef<(() => void) | null>(null);
+  const { updateSessionStatus, updateBackendSessionId, reconnectSession } = useTerminalStore();
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -79,6 +81,7 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
     let isDisposed = false;
     let resizeTimer: ReturnType<typeof setTimeout> | null = null;
     let textareaClearTimer: ReturnType<typeof setTimeout> | null = null;
+    let connectTimeout: ReturnType<typeof setTimeout> | null = null;
 
     // Track IME composition lifecycle to guard against duplicate input emissions
     let isComposing = false;
@@ -106,8 +109,6 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       lastComposedText = e.data || "";
 
       // Schedule safe clearing of the hidden textarea value once xterm's microtask tick completes.
-      // This eliminates stale character residue accumulation which causes duplicate diff emissions
-      // and multi-word repetitions ("有时候还输入很多").
       if (textareaClearTimer) clearTimeout(textareaClearTimer);
       textareaClearTimer = setTimeout(() => {
         if (textarea && !isComposing) {
@@ -130,69 +131,111 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       term.write(data);
     };
 
-    updateSessionStatus(session.id, "connecting");
+    const startSession = () => {
+      if (isDisposed) return;
 
-    // Open remote terminal session in Tokio backend
-    safeInvoke<string>("terminal_open", {
-      serverId: session.serverId,
-      cols: term.cols || 80,
-      rows: term.rows || 24,
-      initialDir: session.initialDir || null,
-      remoteProxy: session.remoteProxy || null,
-      onData: channel,
-    })
-      .then((backendId) => {
-        if (isDisposed) {
-          safeInvoke("terminal_close", { sessionId: backendId }).catch(console.error);
-          return;
+      // Close previous backend session if any
+      const previousId = backendSessionIdRef.current;
+      if (previousId) {
+        backendSessionIdRef.current = null;
+        updateBackendSessionId(session.id, null);
+        safeInvoke("terminal_close", { sessionId: previousId }).catch(console.error);
+      }
+
+      updateSessionStatus(session.id, "connecting");
+
+      if (connectTimeout) clearTimeout(connectTimeout);
+      connectTimeout = setTimeout(() => {
+        if (!backendSessionIdRef.current && !isDisposed) {
+          updateSessionStatus(session.id, "disconnected");
+          updateBackendSessionId(session.id, null);
+          term.writeln("\r\n\x1b[31m[Remora] Connection handshake timed out (12s).\x1b[0m");
+          term.writeln("\x1b[33mPress [Enter] or click 'Reconnect' to retry.\x1b[0m\r\n");
         }
-        backendSessionIdRef.current = backendId;
-        updateSessionStatus(session.id, "connected");
+      }, 12000);
 
-        // Send user input to backend with high-precision IME deduplication
-        term.onData(async (inputData) => {
-          if (!backendSessionIdRef.current || !inputData) return;
-
-          const now = performance.now();
-          const timeSinceComposition = now - lastCompositionEndTime;
-          const timeSinceLastSend = now - lastSentTime;
-
-          // High-precision IME deduplication guard:
-          // If we are currently composing or within 150ms of composition end,
-          // and the exact same input string is received within 100ms, it is a duplicate
-          // fired by xterm's dual input path (_inputEvent + CompositionHelper). Drop it!
-          // We also verify that the inputData matches the composed text or is CJK/multi-character,
-          // ensuring single-key English rapid double typing (e.g. 'll' in 'hello') is never affected.
-          const isRecentComposition = isComposing || timeSinceComposition < 150;
-          const isCjkOrMultiChar = inputData.length > 1 || /[^\x00-\x7F]/.test(inputData);
-          if (
-            isRecentComposition &&
-            inputData === lastSentData &&
-            timeSinceLastSend < 100 &&
-            (inputData === lastComposedText || isCjkOrMultiChar)
-          ) {
+      safeInvoke<string>("terminal_open", {
+        serverId: session.serverId,
+        cols: term.cols || 80,
+        rows: term.rows || 24,
+        initialDir: session.initialDir || null,
+        remoteProxy: session.remoteProxy || null,
+        onData: channel,
+      })
+        .then((backendId) => {
+          if (connectTimeout) {
+            clearTimeout(connectTimeout);
+            connectTimeout = null;
+          }
+          if (isDisposed) {
+            safeInvoke("terminal_close", { sessionId: backendId }).catch(console.error);
             return;
           }
-
-          lastSentData = inputData;
-          lastSentTime = now;
-
-          try {
-            const bytes = Array.from(new TextEncoder().encode(inputData));
-            await safeInvoke("terminal_write", {
-              sessionId: backendSessionIdRef.current,
-              data: bytes,
-            });
-          } catch (err) {
-            console.error("Failed to write to terminal:", err);
+          backendSessionIdRef.current = backendId;
+          updateSessionStatus(session.id, "connected");
+          updateBackendSessionId(session.id, backendId);
+        })
+        .catch((err) => {
+          if (connectTimeout) {
+            clearTimeout(connectTimeout);
+            connectTimeout = null;
           }
+          console.error("Failed to open terminal session:", err);
+          updateSessionStatus(session.id, "disconnected");
+          updateBackendSessionId(session.id, null);
+          term.writeln(`\r\n\x1b[31m[Remora] Error opening terminal: ${err}\x1b[0m`);
+          term.writeln("\x1b[33mPress [Enter] or click 'Reconnect' to retry.\x1b[0m\r\n");
         });
-      })
-      .catch((err) => {
-        console.error("Failed to open terminal session:", err);
+    };
+
+    startSessionRef.current = startSession;
+    startSession();
+
+    // Send user input to backend with high-precision IME deduplication
+    term.onData(async (inputData) => {
+      // When session is disconnected, pressing Enter or Space attempts automatic reconnection
+      if (!backendSessionIdRef.current) {
+        if (inputData === "\r" || inputData === "\n" || inputData === " ") {
+          reconnectSession(session.id);
+        }
+        return;
+      }
+
+      const now = performance.now();
+      const timeSinceComposition = now - lastCompositionEndTime;
+      const timeSinceLastSend = now - lastSentTime;
+
+      // High-precision IME deduplication guard
+      const isRecentComposition = isComposing || timeSinceComposition < 150;
+      const isCjkOrMultiChar = inputData.length > 1 || /[^\x00-\x7F]/.test(inputData);
+      if (
+        isRecentComposition &&
+        inputData === lastSentData &&
+        timeSinceLastSend < 100 &&
+        (inputData === lastComposedText || isCjkOrMultiChar)
+      ) {
+        return;
+      }
+
+      lastSentData = inputData;
+      lastSentTime = now;
+
+      try {
+        const bytes = Array.from(new TextEncoder().encode(inputData));
+        await safeInvoke("terminal_write", {
+          sessionId: backendSessionIdRef.current,
+          data: bytes,
+        });
+      } catch (err) {
+        console.warn("Failed to write to terminal, session disconnected:", err);
+        backendSessionIdRef.current = null;
         updateSessionStatus(session.id, "disconnected");
-        term.writeln(`\r\n\x1b[31m[Remora] Error opening terminal: ${err}\x1b[0m\r\n`);
-      });
+        updateBackendSessionId(session.id, null);
+        term.writeln(
+          "\r\n\x1b[33m[Remora] Terminal session disconnected. Press [Enter] or click 'Reconnect' to restore.\x1b[0m\r\n"
+        );
+      }
+    });
 
     // Resize observer to synchronize terminal dimensions
     const resizeObserver = new ResizeObserver(() => {
@@ -222,6 +265,7 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       isDisposed = true;
       if (resizeTimer) clearTimeout(resizeTimer);
       if (textareaClearTimer) clearTimeout(textareaClearTimer);
+      if (connectTimeout) clearTimeout(connectTimeout);
       if (textarea) {
         textarea.removeEventListener("compositionstart", handleCompositionStart);
         textarea.removeEventListener("compositionupdate", handleCompositionUpdate);
@@ -236,7 +280,17 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       termRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [session.id, session.serverId, session.initialDir, session.remoteProxy, updateSessionStatus]);
+  }, [session.id, session.serverId, session.initialDir, session.remoteProxy, updateSessionStatus, updateBackendSessionId, reconnectSession]);
+
+  // Handle explicit session reconnect trigger (from Tab button, Enter key, or overlay button)
+  useEffect(() => {
+    if (session.reconnectCount && session.reconnectCount > 0) {
+      if (termRef.current) {
+        termRef.current.writeln("\r\n\x1b[36m[Remora] Reconnecting terminal session...\x1b[0m");
+      }
+      startSessionRef.current?.();
+    }
+  }, [session.reconnectCount]);
 
   // Fit and focus when switching to active tab
   useEffect(() => {
@@ -255,9 +309,30 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
 
   return (
     <div
-      ref={containerRef}
       style={{ display: isActive ? "block" : "none" }}
-      className="w-full h-full p-2 bg-[#181818] overflow-hidden"
-    />
+      className="w-full h-full relative overflow-hidden"
+    >
+      {/* Disconnected floating recovery badge */}
+      {session.status === "disconnected" && (
+        <div className="absolute top-2 right-4 z-20 flex items-center gap-2 px-2.5 py-1 rounded bg-[#2a1313]/90 border border-red-500/40 text-red-200 text-xs shadow-md backdrop-blur-xs select-none">
+          <span className="w-2 h-2 rounded-full bg-red-400" />
+          <span className="font-mono text-[11px]">Disconnected</span>
+          <button
+            onClick={() => reconnectSession(session.id)}
+            className="ml-1 px-2 py-0.5 rounded bg-red-800 hover:bg-red-700 text-white font-medium text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
+            title="Reconnect terminal session"
+          >
+            <RotateCcw className="w-2.5 h-2.5" />
+            Reconnect
+          </button>
+        </div>
+      )}
+
+      {/* Terminal View Container */}
+      <div
+        ref={containerRef}
+        className="w-full h-full p-2 bg-[#181818] overflow-hidden"
+      />
+    </div>
   );
 };

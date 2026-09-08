@@ -28,6 +28,7 @@ impl TerminalManager {
         remote_proxy: Option<String>,
         remote_no_proxy: Option<String>,
         on_data: TauriChannel<Vec<u8>>,
+        app: Option<tauri::AppHandle>,
     ) -> Result<String> {
         let session = TerminalSession::start(
             server_id,
@@ -38,6 +39,7 @@ impl TerminalManager {
             remote_no_proxy,
             on_data,
             self.connection.clone(),
+            app,
         )
         .await?;
 

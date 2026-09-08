@@ -252,10 +252,11 @@ impl ConnectionManager {
         let handle = guard.as_mut().ok_or_else(|| {
             AppError::Connection(format!("Server {} handle is not active", server_id))
         })?;
-        handle
-            .channel_open_session()
-            .await
-            .map_err(|e| AppError::Connection(e.to_string()))
+        match tokio::time::timeout(Duration::from_secs(10), handle.channel_open_session()).await {
+            Ok(Ok(ch)) => Ok(ch),
+            Ok(Err(e)) => Err(AppError::Connection(format!("Failed to open SSH channel: {}", e))),
+            Err(_) => Err(AppError::Connection("SSH channel open timed out after 10s. Remote host or connection may be stalled.".to_string())),
+        }
     }
 
     pub async fn reconnect(

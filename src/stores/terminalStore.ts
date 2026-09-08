@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { listen } from "@tauri-apps/api/event";
+import { isRunningInTauri } from "../utils/tauriBridge";
 
 export interface TerminalSession {
   id: string;
@@ -8,6 +10,8 @@ export interface TerminalSession {
   initialDir?: string;
   remoteProxy?: string;
   status: "connecting" | "connected" | "disconnected" | "closed";
+  backendSessionId?: string;
+  reconnectCount?: number;
 }
 
 interface TerminalState {
@@ -18,8 +22,11 @@ interface TerminalState {
   removeSession: (id: string) => void;
   setActiveSession: (id: string) => void;
   updateSessionStatus: (id: string, status: TerminalSession["status"]) => void;
+  updateBackendSessionId: (id: string, backendId: string | null) => void;
+  reconnectSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
   clearAllSessions: () => void;
+  initTerminalListener: () => Promise<() => void>;
 }
 
 export const useTerminalStore = create<TerminalState>((set, get) => ({
@@ -64,6 +71,28 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }));
   },
 
+  updateBackendSessionId: (id, backendId) => {
+    set((state) => ({
+      sessions: state.sessions.map((s) =>
+        s.id === id ? { ...s, backendSessionId: backendId || undefined } : s
+      ),
+    }));
+  },
+
+  reconnectSession: (id) => {
+    set((state) => ({
+      sessions: state.sessions.map((s) =>
+        s.id === id
+          ? {
+              ...s,
+              status: "connecting",
+              reconnectCount: (s.reconnectCount || 0) + 1,
+            }
+          : s
+      ),
+    }));
+  },
+
   renameSession: (id, title) => {
     set((state) => ({
       sessions: state.sessions.map((s) => (s.id === id ? { ...s, title } : s)),
@@ -72,5 +101,25 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   clearAllSessions: () => {
     set({ sessions: [], activeSessionId: null });
+  },
+
+  initTerminalListener: async () => {
+    if (!isRunningInTauri()) return () => {};
+
+    const unlisten = await listen<{ sessionId: string; serverId: string; reason?: string }>(
+      "terminal-session-closed",
+      (event) => {
+        const { sessionId } = event.payload;
+        set((state) => ({
+          sessions: state.sessions.map((s) =>
+            s.id === sessionId || s.backendSessionId === sessionId
+              ? { ...s, status: "disconnected", backendSessionId: undefined }
+              : s
+          ),
+        }));
+      }
+    );
+
+    return unlisten;
   },
 }));
