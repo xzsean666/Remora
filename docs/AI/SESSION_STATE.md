@@ -102,24 +102,32 @@
   - `src/components/Editor/EditorTabBar.tsx`
   - `src/App.tsx`
   - `index.html`
+  - `src/components/Terminal/TerminalTabBar.tsx`
+  - `build.sh`
+  - `package.json`
+  - `src-tauri/tauri.conf.json`
+  - `src-tauri/Cargo.toml`
   - `docs/AI/TASK_INDEX.md`
   - `docs/AI/SESSION_STATE.md`
 
 ---
 
 ## 4. 已运行的验证命令及结果
-- `cargo test --manifest-path src-tauri/Cargo.toml`: 24 组单元测试 + 1 组 e2e 测试全部 100% 通过（适配 15 组默认快捷指令）。
+- `cargo test --manifest-path src-tauri/Cargo.toml`: 24 组单元测试 + 1 组 e2e 测试全部 100% 通过。
 - `pnpm tsc --noEmit`: 前端 TypeScript 类型检查 0 报错通过。
 - `pnpm build`: Vite 生产打包通过，各模块构建正常。
-- `./build.sh --apk`: 本地 Android APK 编译成功，输出至 `release/android/remora-app-universal-release.apk` (29MB) 并生成 SHA256 校验和。
+- `./build.sh --apk`: 自动化版本递增与 Android Release APK 构建测试成功：
+  - 版本号自动递增并同步：`0.1.0` -> `0.1.1`（`package.json`, `tauri.conf.json`, `Cargo.toml` 自动更新）。
+  - Android 原生识别更新：`tauri.android.versionName=0.1.1`, `versionCode=1001`。
+  - APK 命名自动归档：`release/android/remora-universal-release-v0.1.1.apk` (29MB) 与通用指针 `remora-app-universal-release.apk` 成功生成并计算 SHA256。
 
 ---
 
 ## 5. 未解决问题与剩余风险
-- 无。Android 原生 WindowInsets 安全区避让与深色背景设置全部生效，TMUX 会话保活支持已内置。
+- 无。Android 原生 WindowInsets 安全区避让与深色背景设置全部生效，TMUX 会话保活支持已内置，构建脚本自动递增与产物命名机制全部闭环。
 
 ---
 
 ## 6. 下一步执行计划
-- 用户可直接将最新生成的 `release/android/remora-app-universal-release.apk` 发送至 Android 手机进行真机覆盖安装验证。
+- 用户可直接将最新生成的 `release/android/remora-universal-release-v0.1.1.apk` 发送至 Android 手机进行真机覆盖安装验证。
 - 在终端中配合快捷键盘的 `TMUX` 按键体验断线不中断、无缝续接任务的保活效果。

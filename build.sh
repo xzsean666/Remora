@@ -47,6 +47,16 @@ log_error() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
+# 提取项目版本号 (优先从 tauri.conf.json 读取，兜底从 package.json 读取)
+APP_VERSION=""
+if [ -f "${SCRIPT_DIR}/src-tauri/tauri.conf.json" ]; then
+  APP_VERSION="$(grep '"version"' "${SCRIPT_DIR}/src-tauri/tauri.conf.json" | head -n 1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || echo '')"
+fi
+if [ -z "$APP_VERSION" ] && [ -f "${SCRIPT_DIR}/package.json" ]; then
+  APP_VERSION="$(grep '"version"' "${SCRIPT_DIR}/package.json" | head -n 1 | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || echo '')"
+fi
+APP_VERSION="${APP_VERSION:-0.1.0}"
+
 # 打印帮助信息
 show_help() {
   cat << EOF
@@ -66,6 +76,7 @@ Remora 跨平台 Release 构建脚本
   --deb              构建并打包 Debian / Ubuntu (.deb) 安装包到 release/desktop/ (仅支持 Linux)
   --no-bundle        仅编译独立 Release 可执行二进制，跳过所有打包步骤 (默认)
   --all-bundles      尝试编译所有 Tauri 支持的本地桌面安装包
+  --no-bump          不自动递增版本号 (默认每次构建自动递增 patch 修订号)
   --clean            构建前清理历史 dist、target 与 release 缓存
   --help, -h         显示此帮助信息
 
@@ -81,6 +92,7 @@ EOF
 # 解析命令行参数
 BUILD_MODE="default"
 DO_CLEAN=0
+DO_BUMP=1
 ANDROID_TARGET=""
 IS_DEBUG=0
 
@@ -110,6 +122,10 @@ while [ $# -gt 0 ]; do
       BUILD_MODE="all-bundles"
       shift
       ;;
+    --no-bump)
+      DO_BUMP=0
+      shift
+      ;;
     --clean)
       DO_CLEAN=1
       shift
@@ -125,6 +141,34 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+# ------------------------------------------------------------------------------
+# 0. 版本号自动递增 (默认每次构建自动递增 Patch 修订号)
+# ------------------------------------------------------------------------------
+if [ "$DO_BUMP" -eq 1 ]; then
+  major=$(echo "$APP_VERSION" | cut -d. -f1)
+  minor=$(echo "$APP_VERSION" | cut -d. -f2)
+  patch=$(echo "$APP_VERSION" | cut -d. -f3)
+  patch=$((patch + 1))
+  NEW_VERSION="${major}.${minor}.${patch}"
+
+  log_info "自动递增构建版本号: ${APP_VERSION} -> ${NEW_VERSION}"
+
+  # 同步更新 package.json
+  if [ -f "${SCRIPT_DIR}/package.json" ]; then
+    sed -i -E 's/"version"[[:space:]]*:[[:space:]]*"[^"]+"/"version": "'"${NEW_VERSION}"'"/' "${SCRIPT_DIR}/package.json"
+  fi
+  # 同步更新 tauri.conf.json
+  if [ -f "${SCRIPT_DIR}/src-tauri/tauri.conf.json" ]; then
+    sed -i -E 's/"version"[[:space:]]*:[[:space:]]*"[^"]+"/"version": "'"${NEW_VERSION}"'"/' "${SCRIPT_DIR}/src-tauri/tauri.conf.json"
+  fi
+  # 同步更新 Cargo.toml
+  if [ -f "${SCRIPT_DIR}/src-tauri/Cargo.toml" ]; then
+    sed -i -E '0,/^version[[:space:]]*=[[:space:]]*"[^"]+"/s/^version[[:space:]]*=[[:space:]]*"[^"]+"/version = "'"${NEW_VERSION}"'"/' "${SCRIPT_DIR}/src-tauri/Cargo.toml"
+  fi
+
+  APP_VERSION="${NEW_VERSION}"
+fi
 
 # ------------------------------------------------------------------------------
 # 1. 自动环境检测与补全 (Cargo / Rustup / pnpm / Node)
@@ -385,11 +429,17 @@ if [ "$BUILD_MODE" = "apk" ]; then
     [ -z "$apk" ] && continue
     FOUND_COUNT=$((FOUND_COUNT + 1))
     raw_name="$(basename "$apk")"
-    dest_name="remora-${raw_name}"
+    stem="${raw_name%.apk}"
+    clean_stem="${stem#app-}"
+    # 格式规范: remora-universal-release-v0.1.0.apk
+    versioned_name="remora-${clean_stem}-v${APP_VERSION}.apk"
+    legacy_name="remora-${raw_name}"
 
-    # 归档到 release/android/ 专属目录
-    cp -f "$apk" "${RELEASE_DIR}/${dest_name}"
-    log_success "已归档: release/android/${dest_name}"
+    # 归档到 release/android/ 专属目录 (生成带版本号的文件)
+    cp -f "$apk" "${RELEASE_DIR}/${versioned_name}"
+    # 同时保留兼容文件名
+    cp -f "$apk" "${RELEASE_DIR}/${legacy_name}"
+    log_success "已归档: release/android/${versioned_name}"
   done < <(find "${APK_SRC_DIR}" -type f -name "*.apk" 2>/dev/null || true)
 
   if [ "$FOUND_COUNT" -eq 0 ]; then
@@ -420,7 +470,7 @@ if [ "$BUILD_MODE" = "apk" ]; then
   fi
   echo ""
   echo -e "${BOLD}手机安装说明:${NC}"
-  echo -e "  将上述 ${CYAN}release/android/remora-*.apk${NC} 传输到安卓手机，直接点击即可安装运行！"
+  echo -e "  将上述 ${CYAN}release/android/remora-*-v${APP_VERSION}.apk${NC} 传输到安卓手机，直接点击即可安装运行！"
   echo ""
   exit 0
 fi
@@ -495,6 +545,15 @@ if [ -n "${ARCH_RELEASE_DIR:-}" ]; then
   chmod +x "${ARCH_RELEASE_DIR}/${BIN_NAME}"
 fi
 log_success "已归档主程序: ${RELEASE_DIR}/${BIN_NAME}"
+
+# 归档带版本号的独立二进制文件
+VERSIONED_BIN="remora-${TARGET_NAME}-v${APP_VERSION}"
+if [ "$OS" = "windows" ]; then
+  VERSIONED_BIN="remora-${TARGET_NAME}-v${APP_VERSION}.exe"
+fi
+cp -f "${TARGET_BIN}" "${RELEASE_DIR}/${VERSIONED_BIN}"
+chmod +x "${RELEASE_DIR}/${VERSIONED_BIN}"
+log_success "已归档带版本号主程序: ${RELEASE_DIR}/${VERSIONED_BIN}"
 
 # 收集 bundles (若存在)
 BUNDLE_DIR="${SCRIPT_DIR}/src-tauri/target/release/bundle"
