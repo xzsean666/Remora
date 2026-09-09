@@ -1,5 +1,5 @@
 import React from "react";
-import { Terminal, Plus, X, Globe, RotateCcw, Zap } from "lucide-react";
+import { Terminal, Plus, X, Globe, RotateCcw, Zap, Shield } from "lucide-react";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useConnectionStore } from "../../stores/connectionStore";
@@ -21,10 +21,22 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     removeSession,
     addSession,
     reconnectSession,
+    sendDataToActiveTerminal,
   } = useTerminalStore();
   const { currentServerId, rootPath } = useFileTreeStore();
   const { connectedServerProxy, activeServerId, connectedServerName } = useConnectionStore();
   const { toggleTerminal } = useLayoutStore();
+
+  const activeIndex = sessions.findIndex((s) => s.id === activeSessionId) + 1 || 1;
+  const activeSession = sessions.find((s) => s.id === activeSessionId);
+  const rawProject = (activeSession?.initialDir || rootPath || "").split("/").filter(Boolean).pop() || "main";
+  const projectName = rawProject.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const tmuxSessionName = `remora_${projectName}_${activeIndex}`;
+
+  const handleTmuxAutoBootstrap = () => {
+    const cmd = `if ! command -v tmux >/dev/null 2>&1; then printf "\\r\\n\\033[36m[Remora] 服务器未安装 tmux，正在为您全自动安装...\\033[0m\\r\\n"; if command -v apt-get >/dev/null 2>&1; then (which sudo >/dev/null 2>&1 && sudo apt-get update -qq && sudo apt-get install -y tmux) || (apt-get update -qq && apt-get install -y tmux); elif command -v yum >/dev/null 2>&1; then (which sudo >/dev/null 2>&1 && sudo yum install -y tmux) || yum install -y tmux; elif command -v dnf >/dev/null 2>&1; then (which sudo >/dev/null 2>&1 && sudo dnf install -y tmux) || dnf install -y tmux; elif command -v apk >/dev/null 2>&1; then (which sudo >/dev/null 2>&1 && sudo apk add tmux) || apk add tmux; elif command -v pacman >/dev/null 2>&1; then (which sudo >/dev/null 2>&1 && sudo pacman -Sy --noconfirm tmux) || pacman -Sy --noconfirm tmux; fi; fi; if command -v tmux >/dev/null 2>&1; then tmux new -A -D -s ${tmuxSessionName} \\; set -g mouse on \\; set -g window-size latest; else printf "\\033[31m[Remora] 自动安装失败，请检查服务器网络或权限。\\033[0m\\r\\n"; fi\n`;
+    sendDataToActiveTerminal(cmd);
+  };
 
   const effectiveServerId = activeServerId || currentServerId;
 
@@ -136,6 +148,17 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
 
       {/* Right: Actions */}
       <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+        {sessions.length > 0 && (
+          <button
+            title={`一键保活（未安装则全自动安装，绑定 ${tmuxSessionName}，断线进程不中断）`}
+            onClick={handleTmuxAutoBootstrap}
+            className="px-1.5 py-0.5 rounded text-[10px] text-amber-300 hover:text-white hover:bg-vscode-hover border border-amber-500/40 hover:border-amber-400 transition-colors flex items-center gap-1 cursor-pointer"
+          >
+            <Shield className="w-3 h-3 text-amber-400" />
+            <span className="hidden sm:inline">保活</span>
+          </button>
+        )}
+
         {onToggleQuickBar && (
           <button
             title={isQuickBarOpen ? "隐藏快捷命令条 (Hide Quick Bar)" : "显示快捷命令条 (Show Quick Bar)"}

@@ -81,6 +81,9 @@ function saveMockSshKeys(keys: SshKey[]) {
 }
 
 const DEFAULT_MOCK_SNIPPETS: QuickSnippet[] = [
+  { id: "default-ses-1", title: "Tmux 保活/挂载", command: "tmux new -A -s remora", group_name: "Session", auto_execute: true, description: "创建或挂载 remora 会话，断网断线命令后台持续运行", sort_order: 1, created_at: Date.now(), updated_at: Date.now() },
+  { id: "default-ses-2", title: "Tmux 脱离 (Detach)", command: "tmux detach", group_name: "Session", auto_execute: true, description: "安全脱离当前会话返回普通终端，后台任务继续", sort_order: 2, created_at: Date.now(), updated_at: Date.now() },
+  { id: "default-ses-3", title: "Tmux 会话列表", command: "tmux ls", group_name: "Session", auto_execute: true, description: "查看当前服务器上所有持久运行的会话", sort_order: 3, created_at: Date.now(), updated_at: Date.now() },
   { id: "default-sys-1", title: "System Info", command: "uname -a", group_name: "System", auto_execute: true, description: "Print detailed kernel and OS information", sort_order: 1, created_at: Date.now(), updated_at: Date.now() },
   { id: "default-sys-2", title: "Disk Usage", command: "df -h", group_name: "System", auto_execute: true, description: "Show disk space usage in human-readable units", sort_order: 2, created_at: Date.now(), updated_at: Date.now() },
   { id: "default-sys-3", title: "Memory Usage", command: "free -h", group_name: "System", auto_execute: true, description: "Display free and used RAM/Swap", sort_order: 3, created_at: Date.now(), updated_at: Date.now() },

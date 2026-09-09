@@ -136,7 +136,7 @@ mod tests {
 
         // 1. Verify default seed snippets are auto populated
         let initial_snippets = storage.get_quick_snippets().expect("failed to get snippets");
-        assert_eq!(initial_snippets.len(), 12);
+        assert_eq!(initial_snippets.len(), 15);
 
         // 2. Add custom snippet
         let custom_snippet = crate::core::QuickSnippet {
@@ -153,7 +153,7 @@ mod tests {
         storage.save_quick_snippet(&custom_snippet).expect("failed to save snippet");
 
         let snippets_after_add = storage.get_quick_snippets().unwrap();
-        assert_eq!(snippets_after_add.len(), 13);
+        assert_eq!(snippets_after_add.len(), 16);
         let found = snippets_after_add.iter().find(|s| s.id == "custom-1").unwrap();
         assert_eq!(found.title, "Build Production");
         assert_eq!(found.command, "cargo build --release");
@@ -181,14 +181,14 @@ mod tests {
         // 5. Delete individual snippet
         storage.delete_quick_snippet("custom-1").expect("failed to delete snippet");
         let snippets_after_del = storage.get_quick_snippets().unwrap();
-        assert_eq!(snippets_after_del.len(), 12);
+        assert_eq!(snippets_after_del.len(), 15);
         assert!(snippets_after_del.iter().all(|s| s.id != "custom-1"));
 
         // 6. Delete group
         storage.delete_quick_snippet_group("System").expect("failed to delete group");
         let snippets_after_grp_del = storage.get_quick_snippets().unwrap();
         assert!(snippets_after_grp_del.iter().all(|s| s.group_name != "System"));
-        assert_eq!(snippets_after_grp_del.len(), 8); // 12 - 4 System snippets
+        assert_eq!(snippets_after_grp_del.len(), 11); // 15 - 4 System snippets
     }
 
     #[test]
@@ -225,7 +225,7 @@ mod tests {
         assert_eq!(count, 2);
 
         let list = storage.get_quick_snippets().unwrap();
-        assert_eq!(list.len(), 14); // 12 defaults + 2 imported
+        assert_eq!(list.len(), 17); // 15 defaults + 2 imported
         assert!(list.iter().any(|s| s.id == "import-1"));
         assert!(list.iter().any(|s| s.id == "import-2"));
 

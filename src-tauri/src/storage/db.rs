@@ -114,7 +114,11 @@ impl StorageService {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as i64;
-            let defaults: [(&str, &str, &str, &str, i32, &str, i32); 12] = [
+            let defaults: [(&str, &str, &str, &str, i32, &str, i32); 15] = [
+                // Group: Session (会话保活)
+                ("default-ses-1", "Tmux 保活/挂载", "tmux new -A -s remora", "Session", 1, "创建或挂载 remora 会话，断网/断线命令持续在后台运行", 1),
+                ("default-ses-2", "Tmux 脱离 (Detach)", "tmux detach", "Session", 1, "安全脱离当前会话返回普通终端，后台任务继续", 2),
+                ("default-ses-3", "Tmux 会话列表", "tmux ls", "Session", 1, "查看当前服务器上所有持久运行的会话", 3),
                 // Group: System
                 ("default-sys-1", "System Info", "uname -a", "System", 1, "Print detailed kernel and OS information", 1),
                 ("default-sys-2", "Disk Usage", "df -h", "System", 1, "Show disk space usage in human-readable units", 2),

@@ -2,5 +2,8 @@
     <!-- Base application theme. -->
     <style name="Theme.remora" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <!-- Customize your theme here. -->
+        <item name="android:windowBackground">#181818</item>
+        <item name="android:statusBarColor">#181818</item>
+        <item name="android:navigationBarColor">#181818</item>
     </style>
 </resources>

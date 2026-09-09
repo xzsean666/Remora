@@ -38,16 +38,17 @@
 | **TASK-027** | SSH 私钥管理与连接凭证选配支持 (SSH Private Key Management & Selection) | TASK-002, TASK-003, TASK-017, TASK-019 | **DONE** | `docs/AI/tasks/TASK-027.md` |
 | **TASK-028** | 手机端响应式三板块 Tab 视图与终端辅助键盘适配 (Mobile Responsive 3-Tab Layout & Keyboard) | TASK-006, TASK-008, TASK-009 | **DONE** | `docs/AI/tasks/TASK-028.md` |
 | **TASK-029** | Android 移动端工程集成与 GitHub Release 自动打包发布 APK 体系 (Android Build & Release CI) | TASK-021, TASK-027, TASK-028 | **DONE** | `docs/AI/tasks/TASK-029.md` |
+| **TASK-030** | 移动端安全区避让与侧栏自适应修复及终端会话保活联动增强 (Mobile Safe Area & Session Persistence) | TASK-028, TASK-029 | **DONE** | `docs/AI/tasks/TASK-030.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 30
+- **已完成 (DONE)**: 31
 - **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 30
+- **总任务数**: 31
 
 ---
 
@@ -56,5 +57,6 @@
 - Remora 核心功能、远程代理注入、前后端集成、自动化构建发布体系全部就绪。
 - **TASK-027** 圆满完成：实现基于 SQLite `ssh_keys` 表的集中式私钥管理，支持 RSA/Ed25519/OpenSSH 内存直接解码与本地文件路径双向兼容，在服务器连接中支持一键选配已存私钥。
 - **TASK-028** 圆满完成：小屏幕与手机端下全自适应三板块 Tab 切换（工作区、代码编辑器、远程终端一次只展示一个板块），文件点击自动跳转编辑器，视口动态自适应虚拟键盘（`100dvh`），并为终端提供专属移动辅助按键栏（Esc, Tab, Ctrl, Alt, 方向键等）。
-- **TASK-029** 圆满完成：完成 Tauri 2 Android Gradle 原生工程初始化，添加后端桌面与移动平台条件编译隔离，并在 GitHub Actions Release 流水线中集成 Android APK 自动打包、签名与发布资产分发。全部 30 项任务均已圆满达成！
+- **TASK-029** 圆满完成：完成 Tauri 2 Android Gradle 原生工程初始化，添加后端桌面与移动平台条件编译隔离，并在 GitHub Actions Release 流水线中集成 Android APK 自动打包、签名与发布资产分发。
+- **TASK-030** 圆满完成：通过 Android 原生 WindowInsets 监听动态注入安全区边距（状态栏、挖孔屏、导航手势条），彻底消除手机 Header 压住遮挡按钮缺陷；侧栏手机端自适应铺满消除多余黑边；内置移动端终端 `TMUX` 一键保活快捷键与预设 Session 快捷指令群组，并对 Linux SSH 断线原理进行深度原理解惑。全部 31 项任务均已圆满达成！
 

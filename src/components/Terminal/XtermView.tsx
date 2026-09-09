@@ -150,7 +150,7 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
           updateSessionStatus(session.id, "disconnected");
           updateBackendSessionId(session.id, null);
           term.writeln("\r\n\x1b[31m[Remora] Connection handshake timed out (12s).\x1b[0m");
-          term.writeln("\x1b[33mPress [Enter] or click 'Reconnect' to retry.\x1b[0m\r\n");
+          term.writeln("\x1b[33mPress [Enter] or click 'Reconnect' to retry. (提示: 配合 TMUX 即可无缝续接后台任务)\x1b[0m\r\n");
         }
       }, 12000);
 
