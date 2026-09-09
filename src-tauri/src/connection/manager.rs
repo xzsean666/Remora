@@ -90,11 +90,21 @@ impl ConnectionManager {
 
         {
             let mut sessions = self.sessions.write().await;
+            if let Some(old_lock) = sessions.get(&server.id) {
+                let old = old_lock.read().await;
+                let mut old_handle_guard = old.handle.lock().await;
+                if let Some(ref mut h) = *old_handle_guard {
+                    let _ = h.disconnect(russh::Disconnect::ByApplication, "", "").await;
+                }
+                *old_handle_guard = None;
+            }
             sessions.insert(server.id.clone(), session.clone());
         }
 
         let mut config = russh::client::Config::default();
-        config.keepalive_interval = Some(Duration::from_secs(15));
+        config.nodelay = true;
+        config.keepalive_interval = Some(Duration::from_secs(20));
+        config.keepalive_max = 6;
         let config = Arc::new(config);
 
         let handler = ClientHandler::new(server.id.clone(), state_arc.clone());
@@ -266,10 +276,25 @@ impl ConnectionManager {
         let handle = guard.as_mut().ok_or_else(|| {
             AppError::Connection(format!("Server {} handle is not active", server_id))
         })?;
-        match tokio::time::timeout(Duration::from_secs(10), handle.channel_open_session()).await {
+        if handle.is_closed() {
+            *guard = None;
+            self.set_state(server_id, ConnectionState::Disconnected).await;
+            return Err(AppError::Connection(format!("SSH connection for {} has terminated", server_id)));
+        }
+        match tokio::time::timeout(Duration::from_secs(3), handle.channel_open_session()).await {
             Ok(Ok(ch)) => Ok(ch),
-            Ok(Err(e)) => Err(AppError::Connection(format!("Failed to open SSH channel: {}", e))),
-            Err(_) => Err(AppError::Connection("SSH channel open timed out after 10s. Remote host or connection may be stalled.".to_string())),
+            Ok(Err(e)) => {
+                if handle.is_closed() {
+                    *guard = None;
+                    self.set_state(server_id, ConnectionState::Disconnected).await;
+                }
+                Err(AppError::Connection(format!("Failed to open SSH channel: {}", e)))
+            }
+            Err(_) => {
+                *guard = None;
+                self.set_state(server_id, ConnectionState::Disconnected).await;
+                Err(AppError::Connection("SSH channel open timed out after 3s. Remote host or connection may be stalled.".to_string()))
+            }
         }
     }
 
@@ -361,6 +386,43 @@ impl ConnectionManager {
         });
 
         Ok(())
+    }
+
+    pub async fn exec_command(&self, server_id: &str, command: &str) -> Result<String> {
+        let channel = self.open_channel(server_id).await?;
+        let mut channel = channel;
+        channel
+            .exec(true, command)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to exec command: {}", e)))?;
+
+        let mut output = Vec::new();
+        let timeout_dur = Duration::from_secs(8);
+
+        let read_result = tokio::time::timeout(timeout_dur, async {
+            while let Some(msg) = channel.wait().await {
+                match msg {
+                    russh::ChannelMsg::Data { ref data } => {
+                        output.extend_from_slice(data);
+                    }
+                    russh::ChannelMsg::ExtendedData { ref data, .. } => {
+                        output.extend_from_slice(data);
+                    }
+                    russh::ChannelMsg::Eof | russh::ChannelMsg::Close => {
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await;
+
+        let _ = channel.close().await;
+
+        match read_result {
+            Ok(_) => Ok(String::from_utf8_lossy(&output).to_string()),
+            Err(_) => Err(AppError::Internal("SSH command execution timed out after 8s".to_string())),
+        }
     }
 }
 

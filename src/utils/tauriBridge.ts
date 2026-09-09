@@ -548,5 +548,27 @@ export async function deleteSshKey(id: string): Promise<void> {
   await safeInvoke("delete_ssh_key", { id });
 }
 
+export interface TmuxSessionInfo {
+  name: string;
+  windows: number;
+  attached: boolean;
+  created_at: number;
+}
 
+export interface TmuxListResult {
+  installed: boolean;
+  sessions: TmuxSessionInfo[];
+  error?: string | null;
+}
 
+export async function listTmuxSessions(serverId: string): Promise<TmuxListResult> {
+  return await safeInvoke<TmuxListResult>("tmux_list_sessions", { serverId });
+}
+
+export async function killTmuxSession(serverId: string, sessionName: string): Promise<void> {
+  await safeInvoke("tmux_kill_session", { serverId, sessionName });
+}
+
+export async function createTmuxSession(serverId: string, sessionName: string): Promise<void> {
+  await safeInvoke("tmux_new_session", { serverId, sessionName });
+}

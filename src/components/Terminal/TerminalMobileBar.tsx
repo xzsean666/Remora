@@ -1,23 +1,17 @@
 import React, { useState } from "react";
 import { Zap } from "lucide-react";
 import { useTerminalStore } from "../../stores/terminalStore";
-import { useFileTreeStore } from "../../stores/fileTreeStore";
+import { TmuxManagerModal } from "./TmuxManagerModal";
 
 interface TerminalMobileBarProps {
   onToggleSnippets?: () => void;
 }
 
 export const TerminalMobileBar: React.FC<TerminalMobileBarProps> = ({ onToggleSnippets }) => {
-  const { sessions, activeSessionId, sendDataToActiveTerminal } = useTerminalStore();
-  const { rootPath } = useFileTreeStore();
+  const { sendDataToActiveTerminal } = useTerminalStore();
   const [isCtrlActive, setIsCtrlActive] = useState(false);
   const [isAltActive, setIsAltActive] = useState(false);
-
-  const activeIndex = sessions.findIndex((s) => s.id === activeSessionId) + 1 || 1;
-  const activeSession = sessions.find((s) => s.id === activeSessionId);
-  const rawProject = (activeSession?.initialDir || rootPath || "").split("/").filter(Boolean).pop() || "main";
-  const projectName = rawProject.replace(/[^a-zA-Z0-9_-]/g, "_");
-  const tmuxSessionName = `remora_${projectName}_${activeIndex}`;
+  const [isTmuxModalOpen, setIsTmuxModalOpen] = useState(false);
 
   const sendKey = (str: string) => {
     if (isCtrlActive && str.length === 1) {
@@ -41,17 +35,12 @@ export const TerminalMobileBar: React.FC<TerminalMobileBarProps> = ({ onToggleSn
     sendDataToActiveTerminal(str);
   };
 
-  const handleTmuxAutoBootstrap = () => {
-    const cmd = `if ! command -v tmux >/dev/null 2>&1; then printf "\\r\\n\\033[36m[Remora] 服务器未安装 tmux，正在为您全自动安装...\\033[0m\\r\\n"; if command -v apt-get >/dev/null 2>&1; then (which sudo >/dev/null 2>&1 && sudo apt-get update -qq && sudo apt-get install -y tmux) || (apt-get update -qq && apt-get install -y tmux); elif command -v yum >/dev/null 2>&1; then (which sudo >/dev/null 2>&1 && sudo yum install -y tmux) || yum install -y tmux; elif command -v dnf >/dev/null 2>&1; then (which sudo >/dev/null 2>&1 && sudo dnf install -y tmux) || dnf install -y tmux; elif command -v apk >/dev/null 2>&1; then (which sudo >/dev/null 2>&1 && sudo apk add tmux) || apk add tmux; elif command -v pacman >/dev/null 2>&1; then (which sudo >/dev/null 2>&1 && sudo pacman -Sy --noconfirm tmux) || pacman -Sy --noconfirm tmux; fi; fi; if command -v tmux >/dev/null 2>&1; then tmux new -A -D -s ${tmuxSessionName} \\; set -g mouse on \\; set -g window-size latest; else printf "\\033[31m[Remora] 自动安装失败，请检查服务器网络或权限。\\033[0m\\r\\n"; fi\n`;
-    sendDataToActiveTerminal(cmd);
-  };
-
   const keys: { label: string; action: () => void; active?: boolean; highlight?: boolean; title?: string }[] = [
     {
       label: "TMUX",
-      action: handleTmuxAutoBootstrap,
+      action: () => setIsTmuxModalOpen(true),
       highlight: true,
-      title: `一键保活（未检测到则全自动安装，独占挂载 ${tmuxSessionName} 避免多端挤压，并开启触控滚屏）`,
+      title: "打开 TMUX 会话管理器：查看远端所有会话、自由接入、新建或关闭",
     },
     {
       label: "DETACH",
@@ -162,6 +151,11 @@ export const TerminalMobileBar: React.FC<TerminalMobileBarProps> = ({ onToggleSn
           <span className="hidden xs:inline">Quick</span>
         </button>
       )}
+
+      <TmuxManagerModal
+        isOpen={isTmuxModalOpen}
+        onClose={() => setIsTmuxModalOpen(false)}
+      />
     </div>
   );
 };

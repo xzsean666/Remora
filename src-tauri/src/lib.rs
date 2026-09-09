@@ -165,17 +165,16 @@ fn delete_ssh_key(id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
 
 // --- Connection Commands ---
 
-#[tauri::command]
-async fn connect_server(
-    server_id: String,
-    state: State<'_, Arc<AppState>>,
-    app: tauri::AppHandle,
+async fn do_connect_server(
+    server_id: &str,
+    state: &AppState,
+    app: Option<&tauri::AppHandle>,
 ) -> Result<()> {
     let mut server = state
         .storage
-        .get_server(&server_id)?
+        .get_server(server_id)?
         .ok_or_else(|| AppError::NotFound(format!("Server {} not found", server_id)))?;
-    let mut secret = state.keyring.get_secret(&server_id)?;
+    let mut secret = state.keyring.get_secret(server_id)?;
 
     // Resolve saved private key if key_path references a saved key ID
     if server.auth_type == AuthType::PrivateKey {
@@ -195,13 +194,24 @@ async fn connect_server(
         .connect(&server, secret.as_deref())
         .await;
 
-    let current_state = state.connection.get_state(&server_id).await;
-    let _ = app.emit("connection-state-changed", serde_json::json!({
-        "serverId": server_id,
-        "state": current_state
-    }));
+    let current_state = state.connection.get_state(server_id).await;
+    if let Some(app) = app {
+        let _ = app.emit("connection-state-changed", serde_json::json!({
+            "serverId": server_id,
+            "state": current_state
+        }));
+    }
 
     res
+}
+
+#[tauri::command]
+async fn connect_server(
+    server_id: String,
+    state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
+) -> Result<()> {
+    do_connect_server(&server_id, &state, Some(&app)).await
 }
 
 #[tauri::command]
@@ -354,10 +364,37 @@ async fn terminal_open(
     let proxy = remote_proxy.or_else(|| server_config.as_ref().and_then(|s| s.remote_proxy.clone()));
     let no_proxy = remote_no_proxy.or_else(|| server_config.as_ref().and_then(|s| s.remote_no_proxy.clone()));
 
-    state
+    // If the server connection is not in Connected state, attempt auto-reconnect first
+    let current_state = state.connection.get_state(&server_id).await;
+    if current_state != ConnectionState::Connected {
+        tracing::info!(
+            "Server {} is not connected (state: {:?}), attempting auto-reconnect before opening terminal",
+            server_id,
+            current_state
+        );
+        do_connect_server(&server_id, &state, Some(&app)).await?;
+    }
+
+    let first_try = state
         .terminal
-        .open(&server_id, cols, rows, initial_dir, proxy, no_proxy, on_data, Some(app))
-        .await
+        .open(&server_id, cols, rows, initial_dir.clone(), proxy.clone(), no_proxy.clone(), on_data.clone(), Some(app.clone()))
+        .await;
+
+    match first_try {
+        Ok(backend_id) => Ok(backend_id),
+        Err(e) => {
+            tracing::warn!(
+                "First attempt to open terminal failed for {}: {}, attempting to reconnect SSH server and retry...",
+                server_id,
+                e
+            );
+            do_connect_server(&server_id, &state, Some(&app)).await?;
+            state
+                .terminal
+                .open(&server_id, cols, rows, initial_dir, proxy, no_proxy, on_data, Some(app))
+                .await
+        }
+    }
 }
 
 #[tauri::command]
@@ -430,6 +467,103 @@ async fn transfer_list(
     state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<TransferItem>> {
     Ok(state.transfer.list_transfers().await)
+}
+
+// --- TMUX Management Commands ---
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct TmuxSessionInfo {
+    pub name: String,
+    pub windows: u32,
+    pub attached: bool,
+    pub created_at: i64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct TmuxListResult {
+    pub installed: bool,
+    pub sessions: Vec<TmuxSessionInfo>,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+async fn tmux_list_sessions(
+    server_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<TmuxListResult> {
+    let script = r##"if ! command -v tmux >/dev/null 2>&1; then echo "NOT_INSTALLED"; else echo "INSTALLED"; tmux list-sessions -F "#{session_name}|#{session_windows}|#{session_attached}|#{session_created}" 2>/dev/null || true; fi"##;
+    let output = match state.connection.exec_command(&server_id, script).await {
+        Ok(out) => out,
+        Err(e) => {
+            return Ok(TmuxListResult {
+                installed: false,
+                sessions: vec![],
+                error: Some(e.to_string()),
+            });
+        }
+    };
+
+    let mut lines = output.lines();
+    let first_line = lines.next().unwrap_or("").trim();
+
+    if first_line == "NOT_INSTALLED" {
+        return Ok(TmuxListResult {
+            installed: false,
+            sessions: vec![],
+            error: None,
+        });
+    }
+
+    let mut sessions = Vec::new();
+    for line in lines {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = line.split('|').collect();
+        if parts.len() >= 4 {
+            let name = parts[0].to_string();
+            let windows = parts[1].parse::<u32>().unwrap_or(1);
+            let attached = parts[2] == "1" || parts[2].eq_ignore_ascii_case("true");
+            let created_at = parts[3].parse::<i64>().unwrap_or(0);
+            sessions.push(TmuxSessionInfo {
+                name,
+                windows,
+                attached,
+                created_at,
+            });
+        }
+    }
+
+    Ok(TmuxListResult {
+        installed: true,
+        sessions,
+        error: None,
+    })
+}
+
+#[tauri::command]
+async fn tmux_kill_session(
+    server_id: String,
+    session_name: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    let safe_name = session_name.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
+    let cmd = format!("tmux kill-session -t \"{}\" 2>/dev/null || true", safe_name);
+    state.connection.exec_command(&server_id, &cmd).await?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn tmux_new_session(
+    server_id: String,
+    session_name: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    let safe_name = session_name.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
+    let cmd = format!("tmux new-session -d -s \"{}\"", safe_name);
+    state.connection.exec_command(&server_id, &cmd).await?;
+    Ok(())
 }
 
 // --- Window & Lifecycle Commands ---
@@ -618,7 +752,10 @@ pub fn run() {
             delete_quick_snippet,
             delete_quick_snippet_group,
             rename_quick_snippet_group,
-            import_quick_snippets
+            import_quick_snippets,
+            tmux_list_sessions,
+            tmux_kill_session,
+            tmux_new_session
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -22,16 +22,20 @@ export const TerminalPanel: React.FC = () => {
   const handleCreateTerminal = () => {
     if (!effectiveServerId) return;
 
-    const nextIndex = sessions.length + 1;
+    const usedSlots = new Set(sessions.map((s) => s.slotNumber).filter(Boolean));
+    let slotNumber = 1;
+    while (usedSlots.has(slotNumber)) slotNumber++;
+
     const srvLabel = connectedServerName ? `[${connectedServerName}] ` : "";
     const newSession = {
       id: `term-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      title: `${srvLabel}${nextIndex}: bash`,
+      title: `${srvLabel}${slotNumber}: bash`,
       serverId: effectiveServerId,
       serverName: connectedServerName || undefined,
       initialDir: rootPath || undefined,
       remoteProxy: connectedServerProxy || undefined,
       status: "connecting" as const,
+      slotNumber,
     };
 
     addSession(newSession);

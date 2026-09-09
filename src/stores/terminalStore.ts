@@ -12,6 +12,9 @@ export interface TerminalSession {
   status: "connecting" | "connected" | "disconnected" | "closed";
   backendSessionId?: string;
   reconnectCount?: number;
+  pendingCommand?: string | number[];
+  slotNumber?: number;
+  tmuxSessionName?: string;
 }
 
 interface TerminalState {
@@ -23,6 +26,7 @@ interface TerminalState {
   setActiveSession: (id: string) => void;
   updateSessionStatus: (id: string, status: TerminalSession["status"]) => void;
   updateBackendSessionId: (id: string, backendId: string | null) => void;
+  setPendingCommand: (id: string, cmd: string | number[] | null) => void;
   reconnectSession: (id: string) => void;
   renameSession: (id: string, title: string) => void;
   clearAllSessions: () => void;
@@ -73,24 +77,79 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   updateBackendSessionId: (id, backendId) => {
+    set((state) => {
+      const session = state.sessions.find((s) => s.id === id);
+      const pending = session?.pendingCommand;
+      if (backendId && pending) {
+        setTimeout(() => {
+          const bytes =
+            typeof pending === "string"
+              ? Array.from(new TextEncoder().encode(pending))
+              : pending;
+          safeInvoke("terminal_write", {
+            sessionId: backendId,
+            data: bytes,
+          }).catch(console.error);
+        }, 120);
+      }
+      return {
+        sessions: state.sessions.map((s) =>
+          s.id === id
+            ? {
+                ...s,
+                backendSessionId: backendId || undefined,
+                pendingCommand: backendId ? undefined : s.pendingCommand,
+              }
+            : s
+        ),
+      };
+    });
+  },
+
+  setPendingCommand: (id, cmd) => {
     set((state) => ({
       sessions: state.sessions.map((s) =>
-        s.id === id ? { ...s, backendSessionId: backendId || undefined } : s
+        s.id === id ? { ...s, pendingCommand: cmd || undefined } : s
       ),
     }));
   },
 
   reconnectSession: (id) => {
+    const { sessions, activeSessionId } = get();
+    const old = sessions.find((s) => s.id === id);
+    if (!old) return;
+
+    // Auto detect tmux session name from property or title
+    let tmuxName = old.tmuxSessionName;
+    if (!tmuxName) {
+      const match = old.title.match(/tmux:\s*([^\s\]\)]+)/);
+      if (match) tmuxName = match[1];
+    }
+
+    const pendingCmd = tmuxName
+      ? `tmux attach -d -t "${tmuxName}"\n`
+      : old.pendingCommand;
+
+    // Clean up old backend session in background (non-blocking)
+    if (old.backendSessionId) {
+      safeInvoke("terminal_close", { sessionId: old.backendSessionId }).catch(() => {});
+    }
+
+    // Generate a fresh unique session ID to cleanly mount a fresh XtermView component
+    const newId = `term-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const newSession: TerminalSession = {
+      ...old,
+      id: newId,
+      status: "connecting",
+      backendSessionId: undefined,
+      tmuxSessionName: tmuxName || old.tmuxSessionName,
+      pendingCommand: pendingCmd,
+      reconnectCount: (old.reconnectCount || 0) + 1,
+    };
+
     set((state) => ({
-      sessions: state.sessions.map((s) =>
-        s.id === id
-          ? {
-              ...s,
-              status: "connecting",
-              reconnectCount: (s.reconnectCount || 0) + 1,
-            }
-          : s
-      ),
+      sessions: state.sessions.map((s) => (s.id === id ? newSession : s)),
+      activeSessionId: activeSessionId === id ? newId : activeSessionId,
     }));
   },
 
@@ -105,9 +164,16 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   sendDataToActiveTerminal: async (data: string | number[]) => {
-    const { sessions, activeSessionId } = get();
+    const { sessions, activeSessionId, reconnectSession, setPendingCommand } = get();
     const active = sessions.find((s) => s.id === activeSessionId);
-    if (!active || !active.backendSessionId) return;
+    if (!active) return;
+
+    if (!active.backendSessionId || active.status === "disconnected") {
+      // Buffer command and automatically trigger terminal session reconnect
+      setPendingCommand(active.id, data);
+      reconnectSession(active.id);
+      return;
+    }
 
     let bytes: number[];
     if (typeof data === "string") {

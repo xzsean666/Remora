@@ -81,6 +81,32 @@ export default function App() {
     };
     window.addEventListener("keydown", handleKeyDown);
 
+    // Auto-sync connection and auto-heal disconnected active terminal upon app focus / foreground resume
+    let lastResumeTime = 0;
+    const handleResume = () => {
+      const now = Date.now();
+      if (now - lastResumeTime < 1500) return;
+      lastResumeTime = now;
+
+      useConnectionStore.getState().syncConnectionStates();
+
+      const { sessions, activeSessionId, reconnectSession } = useTerminalStore.getState();
+      const active = sessions.find((s) => s.id === activeSessionId);
+      if (active && active.status === "disconnected") {
+        console.info("[Remora] Foreground resume: auto-recovering disconnected terminal", active.id);
+        reconnectSession(active.id);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        handleResume();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleResume);
+
     // Auto-check for updates 3s after startup
     const timer = setTimeout(() => {
       checkUpdate()
@@ -97,6 +123,8 @@ export default function App() {
       if (unlistenTerm) unlistenTerm();
       window.removeEventListener("resize", handleResize);
       window.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleResume);
       clearTimeout(timer);
     };
   }, [initFromPreferences, initListener, initTerminalListener, loadRecentProjects, setIsMobile, toggleSidebarTab]);

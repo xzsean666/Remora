@@ -3,9 +3,10 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Channel } from "@tauri-apps/api/core";
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, RefreshCw, X } from "lucide-react";
 import { safeInvoke } from "../../utils/tauriBridge";
 import { TerminalSession, useTerminalStore } from "../../stores/terminalStore";
+import { useConnectionStore } from "../../stores/connectionStore";
 
 interface XtermViewProps {
   session: TerminalSession;
@@ -18,7 +19,8 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
   const termRef = useRef<Terminal | null>(null);
   const backendSessionIdRef = useRef<string | null>(null);
   const startSessionRef = useRef<(() => void) | null>(null);
-  const { updateSessionStatus, updateBackendSessionId, reconnectSession } = useTerminalStore();
+  const activeChannelRef = useRef<Channel<number[] | Uint8Array> | null>(null);
+  const { updateSessionStatus, updateBackendSessionId, reconnectSession, removeSession } = useTerminalStore();
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -123,36 +125,56 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       textarea.addEventListener("compositionend", handleCompositionEnd);
     }
 
-    // Channel for high throughput binary output from PTY
-    const channel = new Channel<number[] | Uint8Array>();
-    channel.onmessage = (message) => {
-      if (isDisposed) return;
-      const data = message instanceof Uint8Array ? message : new Uint8Array(message);
-      term.write(data);
-    };
-
-    const startSession = () => {
+    const startSession = async () => {
       if (isDisposed) return;
 
-      // Close previous backend session if any
+      // Close previous backend session if any (non-blocking fire-and-forget to avoid deadlock)
       const previousId = backendSessionIdRef.current;
       if (previousId) {
         backendSessionIdRef.current = null;
         updateBackendSessionId(session.id, null);
-        safeInvoke("terminal_close", { sessionId: previousId }).catch(console.error);
+        safeInvoke("terminal_close", { sessionId: previousId }).catch(() => {});
       }
 
       updateSessionStatus(session.id, "connecting");
+
+      // Create a fresh Tauri Channel for EVERY session attempt so it always has an active registered callback
+      const channel = new Channel<number[] | Uint8Array>();
+      activeChannelRef.current = channel;
+      channel.onmessage = (message) => {
+        if (isDisposed || activeChannelRef.current !== channel) return;
+        const data = message instanceof Uint8Array ? message : new Uint8Array(message);
+        term.write(data);
+      };
+
+      // Verify server connection status and self-heal if disconnected
+      const connState = useConnectionStore.getState();
+      const currentServerStatus = connState.serverStates[session.serverId];
+      if (currentServerStatus !== "connected") {
+        term.writeln("\r\n\x1b[36m[Remora] Reconnecting SSH server...\x1b[0m");
+        try {
+          connState.setServerState(session.serverId, "connecting");
+          await safeInvoke("connect_server", { serverId: session.serverId });
+          connState.setServerState(session.serverId, "connected");
+          connState.setActiveServerId(session.serverId);
+        } catch (e) {
+          updateSessionStatus(session.id, "disconnected");
+          connState.setServerState(session.serverId, "failed", { error: String(e) });
+          term.writeln(`\r\n\x1b[31m[Remora] SSH connection failed: ${e}\x1b[0m`);
+          term.writeln("\x1b[33mPress [Enter] or click 'Reconnect' to retry.\x1b[0m\r\n");
+          return;
+        }
+      }
 
       if (connectTimeout) clearTimeout(connectTimeout);
       connectTimeout = setTimeout(() => {
         if (!backendSessionIdRef.current && !isDisposed) {
           updateSessionStatus(session.id, "disconnected");
           updateBackendSessionId(session.id, null);
-          term.writeln("\r\n\x1b[31m[Remora] Connection handshake timed out (12s).\x1b[0m");
+          term.writeln("\r\n\x1b[31m[Remora] Connection handshake timed out (15s).\x1b[0m");
           term.writeln("\x1b[33mPress [Enter] or click 'Reconnect' to retry. (提示: 配合 TMUX 即可无缝续接后台任务)\x1b[0m\r\n");
         }
-      }, 12000);
+      }, 15000);
 
       safeInvoke<string>("terminal_open", {
         serverId: session.serverId,
@@ -167,8 +189,8 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
             clearTimeout(connectTimeout);
             connectTimeout = null;
           }
-          if (isDisposed) {
-            safeInvoke("terminal_close", { sessionId: backendId }).catch(console.error);
+          if (isDisposed || activeChannelRef.current !== channel) {
+            safeInvoke("terminal_close", { sessionId: backendId }).catch(() => {});
             return;
           }
           backendSessionIdRef.current = backendId;
@@ -314,17 +336,34 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
     >
       {/* Disconnected floating recovery badge */}
       {session.status === "disconnected" && (
-        <div className="absolute top-2 right-4 z-20 flex items-center gap-2 px-2.5 py-1 rounded bg-[#2a1313]/90 border border-red-500/40 text-red-200 text-xs shadow-md backdrop-blur-xs select-none">
+        <div className="absolute top-2 right-4 z-20 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[#241212]/95 border border-red-500/50 text-red-200 text-xs shadow-xl backdrop-blur-md select-none animate-in fade-in duration-150">
           <span className="w-2 h-2 rounded-full bg-red-400" />
-          <span className="font-mono text-[11px]">Disconnected</span>
+          <span className="font-mono text-[11px] font-medium">Disconnected</span>
           <button
             onClick={() => reconnectSession(session.id)}
-            className="ml-1 px-2 py-0.5 rounded bg-red-800 hover:bg-red-700 text-white font-medium text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
-            title="Reconnect terminal session"
+            className="ml-1 px-2.5 py-1 rounded bg-red-800 hover:bg-red-700 active:bg-red-900 text-white font-medium text-[11px] flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+            title="重新打开并恢复终端"
           >
-            <RotateCcw className="w-2.5 h-2.5" />
-            Reconnect
+            <RotateCcw className="w-3 h-3" />
+            {session.tmuxSessionName ? "恢复 TMUX" : "重新连接"}
           </button>
+          <button
+            onClick={() => removeSession(session.id)}
+            className="p-1 rounded hover:bg-red-900/60 text-red-300 hover:text-white transition-colors cursor-pointer"
+            title="关闭该终端标签页"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Connecting floating badge */}
+      {session.status === "connecting" && (
+        <div className="absolute top-2 right-4 z-20 flex items-center gap-2 px-2.5 py-1 rounded-lg bg-[#13202e]/90 border border-sky-500/40 text-sky-200 text-xs shadow-md backdrop-blur-xs select-none">
+          <RefreshCw className="w-3 h-3 text-sky-400 animate-spin" />
+          <span className="font-mono text-[11px]">
+            {session.tmuxSessionName ? "正在恢复 TMUX..." : "Connecting..."}
+          </span>
         </div>
       )}
 

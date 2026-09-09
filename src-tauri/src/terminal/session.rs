@@ -13,7 +13,7 @@ pub struct TerminalSession {
     pub id: String,
     pub server_id: String,
     tx_input: mpsc::Sender<Vec<u8>>,
-    channel: Arc<Mutex<russh::Channel<Msg>>>,
+    write_half: Arc<Mutex<russh::ChannelWriteHalf<Msg>>>,
 }
 
 pub const DEFAULT_NO_PROXY: &str =
@@ -135,64 +135,56 @@ impl TerminalSession {
             .await;
         }
 
-        let channel_arc = Arc::new(Mutex::new(channel));
+        let (read_half, write_half) = channel.split();
+        let write_half_arc = Arc::new(Mutex::new(write_half));
         let (tx_input, mut rx_input) = mpsc::channel::<Vec<u8>>(128);
 
-        let ch_clone = channel_arc.clone();
         let session_id_clone = id.clone();
         let server_id_clone = server_id.to_string();
         let app_handle_clone = app_handle.clone();
 
+        // Spawn dedicated background reader task (lockless on read_half)
         tokio::spawn(async move {
-            info!("Terminal background task started for session {}", session_id_clone);
-            loop {
-                tokio::select! {
-                    Some(input) = rx_input.recv() => {
-                        let ch = ch_clone.lock().await;
-                        if let Err(e) = ch.data(input.as_slice()).await {
-                            warn!("Terminal input write failed: {}", e);
-                            let _ = on_data.send(b"\r\n\x1b[33m[Remora] Terminal write failed (channel closed).\x1b[0m\r\n".to_vec());
-                            if let Some(ref app) = app_handle_clone {
-                                let _ = app.emit("terminal-session-closed", serde_json::json!({
-                                    "sessionId": session_id_clone,
-                                    "serverId": server_id_clone,
-                                    "reason": format!("Write failed: {}", e)
-                                }));
-                            }
+            info!("Terminal background reader started for session {}", session_id_clone);
+            let mut read_half = read_half;
+            while let Some(msg) = read_half.wait().await {
+                match msg {
+                    ChannelMsg::Data { ref data } => {
+                        if on_data.send(data.to_vec()).is_err() {
                             break;
                         }
                     }
-                    msg = async {
-                        let mut ch = ch_clone.lock().await;
-                        ch.wait().await
-                    } => {
-                        match msg {
-                            Some(ChannelMsg::Data { ref data }) => {
-                                if on_data.send(data.to_vec()).is_err() {
-                                    // Webview channel closed or navigated
-                                    break;
-                                }
-                            }
-                            Some(ChannelMsg::ExtendedData { ref data, .. }) => {
-                                if on_data.send(data.to_vec()).is_err() {
-                                    break;
-                                }
-                            }
-                            Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) | None => {
-                                info!("Terminal session {} closed by remote host", session_id_clone);
-                                let _ = on_data.send(b"\r\n\x1b[33m[Remora] Remote host closed the terminal session.\x1b[0m\r\n".to_vec());
-                                if let Some(ref app) = app_handle_clone {
-                                    let _ = app.emit("terminal-session-closed", serde_json::json!({
-                                        "sessionId": session_id_clone,
-                                        "serverId": server_id_clone,
-                                        "reason": "Remote host closed connection"
-                                    }));
-                                }
-                                break;
-                            }
-                            _ => {}
+                    ChannelMsg::ExtendedData { ref data, .. } => {
+                        if on_data.send(data.to_vec()).is_err() {
+                            break;
                         }
                     }
+                    ChannelMsg::Eof | ChannelMsg::Close => {
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            info!("Terminal session {} reader loop terminated", session_id_clone);
+            let _ = on_data.send(b"\r\n\x1b[33m[Remora] Remote host closed the terminal session.\x1b[0m\r\n".to_vec());
+            if let Some(ref app) = app_handle_clone {
+                let _ = app.emit("terminal-session-closed", serde_json::json!({
+                    "sessionId": session_id_clone,
+                    "serverId": server_id_clone,
+                    "reason": "Remote host closed connection"
+                }));
+            }
+        });
+
+        // Spawn dedicated background writer task
+        let wh_clone = write_half_arc.clone();
+        let session_id_clone_w = id.clone();
+        tokio::spawn(async move {
+            while let Some(input) = rx_input.recv().await {
+                let wh = wh_clone.lock().await;
+                if let Err(e) = wh.data(input.as_slice()).await {
+                    warn!("Terminal input write failed for {}: {}", session_id_clone_w, e);
+                    break;
                 }
             }
         });
@@ -201,7 +193,7 @@ impl TerminalSession {
             id,
             server_id: server_id.to_string(),
             tx_input,
-            channel: channel_arc,
+            write_half: write_half_arc,
         })
     }
 
@@ -213,16 +205,19 @@ impl TerminalSession {
     }
 
     pub async fn resize(&self, cols: u32, rows: u32) -> Result<()> {
-        let ch = self.channel.lock().await;
-        ch.window_change(cols.max(10), rows.max(5), 0, 0)
+        let wh = self.write_half.lock().await;
+        wh.window_change(cols.max(10), rows.max(5), 0, 0)
             .await
             .map_err(|e| AppError::Terminal(format!("Failed to send window resize: {}", e)))
     }
 
     pub async fn close(&self) -> Result<()> {
-        let ch = self.channel.lock().await;
-        let _ = ch.eof().await;
-        let _ = ch.close().await;
+        let _ = tokio::time::timeout(Duration::from_millis(800), async {
+            let wh = self.write_half.lock().await;
+            let _ = wh.eof().await;
+            let _ = wh.close().await;
+        })
+        .await;
         Ok(())
     }
 }

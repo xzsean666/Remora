@@ -1,9 +1,10 @@
-import React from "react";
-import { Terminal, Plus, X, Globe, RotateCcw, Zap, Shield } from "lucide-react";
+import React, { useState } from "react";
+import { Terminal, Plus, X, Globe, RotateCcw, Zap, Layers } from "lucide-react";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useLayoutStore } from "../../stores/layoutStore";
+import { TmuxManagerModal } from "./TmuxManagerModal";
 
 interface TerminalTabBarProps {
   isQuickBarOpen?: boolean;
@@ -21,22 +22,11 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
     removeSession,
     addSession,
     reconnectSession,
-    sendDataToActiveTerminal,
   } = useTerminalStore();
   const { currentServerId, rootPath } = useFileTreeStore();
   const { connectedServerProxy, activeServerId, connectedServerName } = useConnectionStore();
   const { toggleTerminal } = useLayoutStore();
-
-  const activeIndex = sessions.findIndex((s) => s.id === activeSessionId) + 1 || 1;
-  const activeSession = sessions.find((s) => s.id === activeSessionId);
-  const rawProject = (activeSession?.initialDir || rootPath || "").split("/").filter(Boolean).pop() || "main";
-  const projectName = rawProject.replace(/[^a-zA-Z0-9_-]/g, "_");
-  const tmuxSessionName = `remora_${projectName}_${activeIndex}`;
-
-  const handleTmuxAutoBootstrap = () => {
-    const cmd = `if ! command -v tmux >/dev/null 2>&1; then printf "\\r\\n\\033[36m[Remora] 服务器未安装 tmux，正在为您全自动安装...\\033[0m\\r\\n"; if command -v apt-get >/dev/null 2>&1; then (which sudo >/dev/null 2>&1 && sudo apt-get update -qq && sudo apt-get install -y tmux) || (apt-get update -qq && apt-get install -y tmux); elif command -v yum >/dev/null 2>&1; then (which sudo >/dev/null 2>&1 && sudo yum install -y tmux) || yum install -y tmux; elif command -v dnf >/dev/null 2>&1; then (which sudo >/dev/null 2>&1 && sudo dnf install -y tmux) || dnf install -y tmux; elif command -v apk >/dev/null 2>&1; then (which sudo >/dev/null 2>&1 && sudo apk add tmux) || apk add tmux; elif command -v pacman >/dev/null 2>&1; then (which sudo >/dev/null 2>&1 && sudo pacman -Sy --noconfirm tmux) || pacman -Sy --noconfirm tmux; fi; fi; if command -v tmux >/dev/null 2>&1; then tmux new -A -D -s ${tmuxSessionName} \\; set -g mouse on \\; set -g window-size latest; else printf "\\033[31m[Remora] 自动安装失败，请检查服务器网络或权限。\\033[0m\\r\\n"; fi\n`;
-    sendDataToActiveTerminal(cmd);
-  };
+  const [isTmuxModalOpen, setIsTmuxModalOpen] = useState(false);
 
   const effectiveServerId = activeServerId || currentServerId;
 
@@ -46,16 +36,20 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
       return;
     }
 
-    const nextIndex = sessions.length + 1;
+    const usedSlots = new Set(sessions.map((s) => s.slotNumber).filter(Boolean));
+    let slotNumber = 1;
+    while (usedSlots.has(slotNumber)) slotNumber++;
+
     const srvLabel = connectedServerName ? `[${connectedServerName}] ` : "";
     const newSession = {
       id: `term-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      title: `${srvLabel}${nextIndex}: bash`,
+      title: `${srvLabel}${slotNumber}: bash`,
       serverId: effectiveServerId,
       serverName: connectedServerName || undefined,
       initialDir: rootPath || undefined,
       remoteProxy: connectedServerProxy || undefined,
       status: "connecting" as const,
+      slotNumber,
     };
 
     addSession(newSession);
@@ -120,7 +114,7 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
               {/* Reconnect session button when disconnected */}
               {session.status === "disconnected" && (
                 <button
-                  title="Reconnect Terminal"
+                  title={session.tmuxSessionName ? "恢复 TMUX 会话" : "重新连接终端"}
                   onClick={(e) => {
                     e.stopPropagation();
                     reconnectSession(session.id);
@@ -147,17 +141,15 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
       </div>
 
       {/* Right: Actions */}
-      <div className="flex items-center gap-1 ml-2 flex-shrink-0">
-        {sessions.length > 0 && (
-          <button
-            title={`一键保活（未安装则全自动安装，绑定 ${tmuxSessionName}，断线进程不中断）`}
-            onClick={handleTmuxAutoBootstrap}
-            className="px-1.5 py-0.5 rounded text-[10px] text-amber-300 hover:text-white hover:bg-vscode-hover border border-amber-500/40 hover:border-amber-400 transition-colors flex items-center gap-1 cursor-pointer"
-          >
-            <Shield className="w-3 h-3 text-amber-400" />
-            <span className="hidden sm:inline">保活</span>
-          </button>
-        )}
+      <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
+        <button
+          title="TMUX 会话管理器：查看远端所有会话、自由接入、新建或关闭"
+          onClick={() => setIsTmuxModalOpen(true)}
+          className="px-2 py-0.5 rounded text-[11px] font-mono text-amber-300 hover:text-white hover:bg-vscode-hover border border-amber-500/50 hover:border-amber-400 transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
+        >
+          <Layers className="w-3.5 h-3.5 text-amber-400" />
+          <span>TMUX</span>
+        </button>
 
         {onToggleQuickBar && (
           <button
@@ -189,6 +181,11 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
           <X className="w-3.5 h-3.5" />
         </button>
       </div>
+
+      <TmuxManagerModal
+        isOpen={isTmuxModalOpen}
+        onClose={() => setIsTmuxModalOpen(false)}
+      />
     </div>
   );
 };
