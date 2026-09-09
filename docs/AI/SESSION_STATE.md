@@ -78,7 +78,14 @@
   - `src/components/Editor/EditorTabBar.tsx`
   - `src/App.tsx`
   - `index.html`
+  - `package.json`
+  - `build.sh`
+  - `scripts/install-desktop.sh`
+  - `.gitignore`
+  - `src-tauri/gen/android/build.gradle.kts`
   - `src-tauri/gen/android/app/build.gradle.kts`
+  - `src-tauri/gen/android/buildSrc/src/main/java/com/remora/app/kotlin/BuildTask.kt`
+  - `src-tauri/gen/android/gradle/wrapper/gradle-wrapper.properties`
   - `.github/workflows/release.yml`
   - `docs/AI/TASK_INDEX.md`
   - `docs/AI/SESSION_STATE.md`
@@ -89,13 +96,15 @@
 - `cargo test --manifest-path src-tauri/Cargo.toml`: 24 组单元测试 + 1 组 e2e 测试全部 100% 通过（新增 `test_ssh_keys_crud`）。
 - `pnpm tsc --noEmit`: 前端 TypeScript 类型检查 0 报错通过。
 - `pnpm build`: Vite 生产打包通过，各模块构建正常。
+- `./build.sh --apk`: 本地 Android APK 编译成功，输出至 `release/android/remora-app-universal-release.apk` (29MB) 并生成 SHA256 校验和。
 
 ---
 
 ## 5. 未解决问题与剩余风险
-- 无。桌面端多面板与移动端单板块 Tab 相互隔离良好，私钥选配支持内存直解与文件路径向下兼容，Android 自动化构建流程完备。
+- 无。Android 编译环境已完全配置完成（Android SDK 34/36, NDK 26.1, Gradle 8.14 镜像, BuildTask pnpm 路径已修正），本地与 CI 流水线均已打通。
 
 ---
 
 ## 6. 下一步执行计划
-- 用户后续可直接通过 push 带有 `v*` 格式的 tag 触发 GitHub Actions 发布包含 Linux/macOS/Windows 以及 Android `.apk` 文件的完整 Release。
+- 用户可直接将 `release/android/remora-app-universal-release.apk` 发送至 Android 手机进行真机安装与测试。
+- 如需提交代码并发布，可使用 `git push origin main` 并推送 tag 触发 GitHub Actions 自动构建多平台 Release 资产。

@@ -55,26 +55,49 @@ Remora 跨平台 Release 构建脚本
 用法:
   ./build.sh [选项]
 
+平台归档目录 (release/ 下清晰划分两大平台):
+  - 桌面端 (Linux / Windows / macOS): release/desktop/
+  - 手机端 (Android APK):             release/android/
+
 选项:
-  --deb              构建并打包 Debian / Ubuntu (.deb) 安装包 (仅支持 Linux)
+  --apk, --android   构建 Android APK 安装包，归档到 release/android/ 目录
+  --target <arch>    指定 Android 构建目标 (例如 aarch64-linux-android, 默认主流 64 位 ARM)
+  --debug            构建 Debug 版本的 APK (默认构建带有内置自动签名的 Release 版 APK)
+  --deb              构建并打包 Debian / Ubuntu (.deb) 安装包到 release/desktop/ (仅支持 Linux)
   --no-bundle        仅编译独立 Release 可执行二进制，跳过所有打包步骤 (默认)
-  --all-bundles      尝试编译所有 Tauri 支持的本地安装包
+  --all-bundles      尝试编译所有 Tauri 支持的本地桌面安装包
   --clean            构建前清理历史 dist、target 与 release 缓存
   --help, -h         显示此帮助信息
 
 示例:
-  ./build.sh                 # 默认编译 release 二进制，输出到 release/linux_x64/
-  ./build.sh --deb           # 编译二进制并打包 .deb 安装包到 release/linux_x64/
-  ./build.sh --clean         # 先清理再编译
+  ./build.sh --apk                 # 编译 Android APK，输出到 release/android/
+  ./build.sh --apk --debug         # 编译带调试信息的 Debug 版 APK 到 release/android/
+  ./build.sh --deb                 # 编译桌面二进制并打包 .deb 安装包到 release/desktop/
+  ./build.sh                       # 默认编译桌面 release 二进制，输出到 release/desktop/
+  ./build.sh --clean               # 先清理再编译
 EOF
 }
 
 # 解析命令行参数
 BUILD_MODE="default"
 DO_CLEAN=0
+ANDROID_TARGET=""
+IS_DEBUG=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --apk|--android)
+      BUILD_MODE="apk"
+      shift
+      ;;
+    --target)
+      ANDROID_TARGET="${2:-}"
+      shift 2
+      ;;
+    --debug)
+      IS_DEBUG=1
+      shift
+      ;;
     --deb)
       BUILD_MODE="deb"
       shift
@@ -177,6 +200,90 @@ if [ ${#MISSING_TOOLS[@]} -ne 0 ]; then
   exit 1
 fi
 
+# 如果是 Android APK 构建，额外检查并配置 Android 工具链
+if [ "$BUILD_MODE" = "apk" ]; then
+  # 检查 Java
+  if ! command -v java &>/dev/null; then
+    log_error "未检测到 Java 运行环境 (java)。Android 构建需要 JDK 17+。"
+    echo "请安装 JDK 17，例如: sudo apt install openjdk-17-jdk"
+    exit 1
+  fi
+
+  # 检测并补全 ANDROID_HOME
+  if [ -z "${ANDROID_HOME:-}" ]; then
+    for candidate in \
+      "${HOME}/Android/Sdk" \
+      "${HOME}/android-sdk" \
+      "/usr/lib/android-sdk" \
+      "/opt/android-sdk"; do
+      if [ -d "$candidate" ]; then
+        export ANDROID_HOME="$candidate"
+        log_info "自动定位 Android SDK: ${ANDROID_HOME}"
+        break
+      fi
+    done
+  fi
+
+  if [ -z "${ANDROID_HOME:-}" ] || [ ! -d "${ANDROID_HOME}" ]; then
+    log_error "未检测到 Android SDK！"
+    echo "请配置 ANDROID_HOME 环境变量，例如:"
+    echo "  export ANDROID_HOME=\$HOME/Android/Sdk"
+    exit 1
+  fi
+
+  # 检测并补全 NDK_HOME
+  if [ -z "${NDK_HOME:-}" ]; then
+    if [ -d "${ANDROID_HOME}/ndk" ]; then
+      LATEST_NDK="$(ls -d "${ANDROID_HOME}/ndk"/* 2>/dev/null | sort -V | tail -n 1 || true)"
+      if [ -n "$LATEST_NDK" ] && [ -d "$LATEST_NDK" ]; then
+        export NDK_HOME="$LATEST_NDK"
+        log_info "自动定位 Android NDK: ${NDK_HOME}"
+      fi
+    fi
+  fi
+
+  if [ -z "${NDK_HOME:-}" ] || [ ! -d "${NDK_HOME}" ]; then
+    log_error "未检测到 Android NDK！"
+    echo "请在 Android SDK 中安装 NDK (推荐 26.x)，或设置 NDK_HOME 环境变量:"
+    echo "  export NDK_HOME=\$ANDROID_HOME/ndk/26.1.10909125"
+    exit 1
+  fi
+
+  # 规范化 Android 目标架构 (Tauri 接受: aarch64, armv7, x86_64, i686)
+  case "${ANDROID_TARGET:-}" in
+    aarch64|aarch64-linux-android|"")
+      TAURI_TARGET="aarch64"
+      RUST_TARGET="aarch64-linux-android"
+      ;;
+    armv7|armv7-linux-androideabi)
+      TAURI_TARGET="armv7"
+      RUST_TARGET="armv7-linux-androideabi"
+      ;;
+    x86_64|x86_64-linux-android)
+      TAURI_TARGET="x86_64"
+      RUST_TARGET="x86_64-linux-android"
+      ;;
+    i686|i686-linux-android)
+      TAURI_TARGET="i686"
+      RUST_TARGET="i686-linux-android"
+      ;;
+    all)
+      TAURI_TARGET=""
+      RUST_TARGET="aarch64-linux-android"
+      ;;
+    *)
+      TAURI_TARGET="${ANDROID_TARGET}"
+      RUST_TARGET="${ANDROID_TARGET}"
+      ;;
+  esac
+
+  # 检查 Rust target，若未安装则自动安装
+  if [ -n "$RUST_TARGET" ] && ! rustup target list --installed | grep -q "^${RUST_TARGET}$"; then
+    log_info "正在为 rustup 安装目标架构: ${RUST_TARGET}..."
+    rustup target add "${RUST_TARGET}" || true
+  fi
+fi
+
 # ------------------------------------------------------------------------------
 # 2. 操作系统与 CPU 架构自动探测
 # ------------------------------------------------------------------------------
@@ -199,8 +306,16 @@ case "$RAW_ARCH" in
   *)             ARCH="$(echo "$RAW_ARCH" | tr '[:upper:]' '[:lower:]')" ;;
 esac
 
-TARGET_NAME="${OS}_${ARCH}"
-RELEASE_DIR="${SCRIPT_DIR}/release/${TARGET_NAME}"
+if [ "$BUILD_MODE" = "apk" ]; then
+  PLATFORM="android"
+  TARGET_NAME="android"
+  RELEASE_DIR="${SCRIPT_DIR}/release/android"
+else
+  PLATFORM="desktop"
+  TARGET_NAME="${OS}_${ARCH}"
+  RELEASE_DIR="${SCRIPT_DIR}/release/desktop"
+  ARCH_RELEASE_DIR="${SCRIPT_DIR}/release/desktop/${TARGET_NAME}"
+fi
 
 echo -e "${BOLD}${CYAN}======================================================${NC}"
 echo -e "${BOLD}${CYAN}            Remora Release Builder                    ${NC}"
@@ -209,6 +324,11 @@ log_info "宿主平台: ${BOLD}${RAW_OS} (${RAW_ARCH})${NC}"
 log_info "目标标识: ${BOLD}${TARGET_NAME}${NC}"
 log_info "发布目录: ${BOLD}${RELEASE_DIR}${NC}"
 log_info "构建模式: ${BOLD}${BUILD_MODE}${NC}"
+if [ "$BUILD_MODE" = "apk" ]; then
+  log_info "Android 架构: ${BOLD}${ANDROID_TARGET}${NC}"
+  log_info "Android SDK: ${ANDROID_HOME}"
+  log_info "Android NDK: ${NDK_HOME}"
+fi
 log_info "Rust 版本: $(rustc --version)"
 log_info "Cargo 版本: $(cargo --version)"
 log_info "pnpm 版本: $(pnpm --version)"
@@ -221,6 +341,9 @@ echo ""
 if [ "$DO_CLEAN" -eq 1 ]; then
   log_info "正在清理历史构建与发布目录..."
   rm -rf dist "${RELEASE_DIR}"
+  if [ "$BUILD_MODE" = "apk" ]; then
+    rm -rf "${SCRIPT_DIR}/release/remora-"*.apk "${SCRIPT_DIR}/src-tauri/gen/android/app/build/outputs/apk"
+  fi
   cargo clean --manifest-path src-tauri/Cargo.toml
   log_success "清理完成"
 fi
@@ -234,6 +357,73 @@ fi
 # ------------------------------------------------------------------------------
 # 4. 执行构建
 # ------------------------------------------------------------------------------
+
+# Android APK 构建独立分支
+if [ "$BUILD_MODE" = "apk" ]; then
+  log_info "开始构建 Remora Android APK..."
+
+  TAURI_ANDROID_ARGS=("android" "build" "--apk")
+  if [ -n "${TAURI_TARGET:-}" ]; then
+    TAURI_ANDROID_ARGS+=("--target" "${TAURI_TARGET}")
+  fi
+  if [ "$IS_DEBUG" -eq 1 ]; then
+    TAURI_ANDROID_ARGS+=("--debug")
+  fi
+
+  log_info "执行构建命令: pnpm tauri ${TAURI_ANDROID_ARGS[*]}"
+  pnpm tauri "${TAURI_ANDROID_ARGS[@]}"
+
+  # ----------------------------------------------------------------------------
+  # 5. 归档 Android APK 产物至 release/android/
+  # ----------------------------------------------------------------------------
+  log_info "正在整理 Android APK 构建产物..."
+  APK_SRC_DIR="${SCRIPT_DIR}/src-tauri/gen/android/app/build/outputs/apk"
+  mkdir -p "${RELEASE_DIR}"
+
+  FOUND_COUNT=0
+  while IFS= read -r apk; do
+    [ -z "$apk" ] && continue
+    FOUND_COUNT=$((FOUND_COUNT + 1))
+    raw_name="$(basename "$apk")"
+    dest_name="remora-${raw_name}"
+
+    # 归档到 release/android/ 专属目录
+    cp -f "$apk" "${RELEASE_DIR}/${dest_name}"
+    log_success "已归档: release/android/${dest_name}"
+  done < <(find "${APK_SRC_DIR}" -type f -name "*.apk" 2>/dev/null || true)
+
+  if [ "$FOUND_COUNT" -eq 0 ]; then
+    log_error "未在 ${APK_SRC_DIR} 中找到生成的 APK 文件！"
+    exit 1
+  fi
+
+  # 为 APK 生成 SHA-256 校验和文件
+  (
+    cd "${RELEASE_DIR}"
+    rm -f SHA256SUMS.txt
+    if command -v sha256sum &>/dev/null; then
+      sha256sum *.apk > SHA256SUMS.txt 2>/dev/null || true
+    elif command -v shasum &>/dev/null; then
+      shasum -a 256 *.apk > SHA256SUMS.txt 2>/dev/null || true
+    fi
+  )
+
+  echo ""
+  echo -e "${BOLD}${GREEN}======================================================${NC}"
+  echo -e "${BOLD}${GREEN}         Android APK Build Succeeded!                 ${NC}"
+  echo -e "${BOLD}${GREEN}======================================================${NC}"
+  log_success "所有 Android APK 已成功生成并归档至发布目录: ${BOLD}${RELEASE_DIR}${NC}"
+  echo ""
+  echo -e "${BOLD}产物清单 (${RELEASE_DIR}):${NC}"
+  if command -v ls &>/dev/null; then
+    ls -lh "${RELEASE_DIR}"
+  fi
+  echo ""
+  echo -e "${BOLD}手机安装说明:${NC}"
+  echo -e "  将上述 ${CYAN}release/android/remora-*.apk${NC} 传输到安卓手机，直接点击即可安装运行！"
+  echo ""
+  exit 0
+fi
 
 log_info "开始构建 Remora..."
 
@@ -276,11 +466,14 @@ fi
 pnpm tauri build "${TAURI_ARGS[@]}"
 
 # ------------------------------------------------------------------------------
-# 5. 归档产物至 release/${TARGET_NAME}
+# 5. 归档桌面端产物至 release/desktop/
 # ------------------------------------------------------------------------------
 
-log_info "正在整理构建产物到 ${RELEASE_DIR}..."
+log_info "正在整理桌面端构建产物到 ${RELEASE_DIR}..."
 mkdir -p "${RELEASE_DIR}"
+if [ -n "${ARCH_RELEASE_DIR:-}" ]; then
+  mkdir -p "${ARCH_RELEASE_DIR}"
+fi
 
 BIN_NAME="remora"
 if [ "$OS" = "windows" ]; then
@@ -294,9 +487,13 @@ if [ ! -f "$TARGET_BIN" ]; then
   exit 1
 fi
 
-# 复制主执行文件
+# 复制主执行文件到 release/desktop/
 cp -f "${TARGET_BIN}" "${RELEASE_DIR}/${BIN_NAME}"
 chmod +x "${RELEASE_DIR}/${BIN_NAME}"
+if [ -n "${ARCH_RELEASE_DIR:-}" ]; then
+  cp -f "${TARGET_BIN}" "${ARCH_RELEASE_DIR}/${BIN_NAME}"
+  chmod +x "${ARCH_RELEASE_DIR}/${BIN_NAME}"
+fi
 log_success "已归档主程序: ${RELEASE_DIR}/${BIN_NAME}"
 
 # 收集 bundles (若存在)
@@ -305,10 +502,16 @@ if [ -d "$BUNDLE_DIR" ]; then
   # 收集 deb 包与签名
   if [ -d "${BUNDLE_DIR}/deb" ]; then
     find "${BUNDLE_DIR}/deb" -maxdepth 1 \( -name "*.deb" -o -name "*.sig" \) -exec cp -f {} "${RELEASE_DIR}/" \;
+    if [ -n "${ARCH_RELEASE_DIR:-}" ]; then
+      find "${BUNDLE_DIR}/deb" -maxdepth 1 \( -name "*.deb" -o -name "*.sig" \) -exec cp -f {} "${ARCH_RELEASE_DIR}/" \;
+    fi
   fi
   # 收集 appimage (若存在)
   if [ -d "${BUNDLE_DIR}/appimage" ]; then
     find "${BUNDLE_DIR}/appimage" -maxdepth 1 -name "*.AppImage" -exec cp -f {} "${RELEASE_DIR}/" \;
+    if [ -n "${ARCH_RELEASE_DIR:-}" ]; then
+      find "${BUNDLE_DIR}/appimage" -maxdepth 1 -name "*.AppImage" -exec cp -f {} "${ARCH_RELEASE_DIR}/" \;
+    fi
   fi
   # 收集 rpm (若存在)
   if [ -d "${BUNDLE_DIR}/rpm" ]; then
@@ -337,6 +540,23 @@ fi
     shasum -a 256 * > SHA256SUMS.txt
   fi
 )
+if [ -n "${ARCH_RELEASE_DIR:-}" ] && [ -d "${ARCH_RELEASE_DIR}" ]; then
+  (
+    cd "${ARCH_RELEASE_DIR}"
+    rm -f SHA256SUMS.txt
+    if command -v sha256sum &>/dev/null; then
+      sha256sum * > SHA256SUMS.txt
+    elif command -v shasum &>/dev/null; then
+      shasum -a 256 * > SHA256SUMS.txt
+    fi
+  )
+fi
+
+# 保持对旧路径 release/${TARGET_NAME} 的软链接兼容
+if [ ! -d "${SCRIPT_DIR}/release/${TARGET_NAME}" ] || [ -L "${SCRIPT_DIR}/release/${TARGET_NAME}" ]; then
+  rm -f "${SCRIPT_DIR}/release/${TARGET_NAME}"
+  ln -sf "desktop" "${SCRIPT_DIR}/release/${TARGET_NAME}"
+fi
 
 # ------------------------------------------------------------------------------
 # 6. 输出构建完成汇总报告
@@ -346,9 +566,9 @@ echo ""
 echo -e "${BOLD}${GREEN}======================================================${NC}"
 echo -e "${BOLD}${GREEN}            Build Succeeded!                          ${NC}"
 echo -e "${BOLD}${GREEN}======================================================${NC}"
-log_success "所有产物已成功生成并存放到: ${BOLD}${RELEASE_DIR}${NC}"
+log_success "所有桌面端产物已成功生成并存放到: ${BOLD}${RELEASE_DIR}${NC}"
 echo ""
-echo -e "${BOLD}产物清单:${NC}"
+echo -e "${BOLD}产物清单 (${RELEASE_DIR}):${NC}"
 
 if command -v ls &>/dev/null; then
   ls -lh "${RELEASE_DIR}"
@@ -356,5 +576,5 @@ fi
 
 echo ""
 echo -e "${BOLD}直接运行方式:${NC}"
-echo -e "  ${CYAN}./release/${TARGET_NAME}/${BIN_NAME}${NC}"
+echo -e "  ${CYAN}./release/desktop/${BIN_NAME}${NC}"
 echo ""

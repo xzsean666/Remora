@@ -128,17 +128,7 @@ jobs:
 
       - name: Build Android APK
         run: |
-          pnpm tauri android build --apk
-
-      - name: Prepare APKs
-        run: |
-          mkdir -p release-apks
-          find src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk" | while read -r apk; do
-            filename=$(basename "$apk")
-            echo "Found APK: $apk -> release-apks/remora-$filename"
-            cp "$apk" "release-apks/remora-$filename"
-          done
-          ls -la release-apks/
+          ./build.sh --apk
 
       - name: Upload Android APKs to Release
         uses: softprops/action-gh-release@v2
@@ -147,5 +137,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref_name || inputs.version }}
-          files: release-apks/*.apk
+          files: release/android/*.apk
 

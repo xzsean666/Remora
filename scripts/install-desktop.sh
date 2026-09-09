@@ -7,7 +7,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN_PATH="${SCRIPT_DIR}/release/linux_x64/remora"
+BIN_PATH="${SCRIPT_DIR}/release/desktop/remora"
+if [ ! -f "${BIN_PATH}" ]; then
+  BIN_PATH="${SCRIPT_DIR}/release/linux_x64/remora"
+fi
 if [ ! -f "${BIN_PATH}" ]; then
   BIN_PATH="${SCRIPT_DIR}/src-tauri/target/release/remora"
 fi

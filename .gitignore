@@ -9,7 +9,7 @@ src-tauri/target/
 Cargo.lock
 
 # Tauri & Release
-src-tauri/gen/
+# src-tauri/gen/android is tracked (has its own .gitignore)
 release/
 
 # Logs
