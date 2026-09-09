@@ -5,65 +5,49 @@
 ---
 
 ## 1. 当前目标与任务
-- **当前 Goal**: TMUX 单会话单终端独占、会话名前置识别与 Android 移动端进程退出数据/凭据持久化
+- **当前 Goal**: 修复 GitHub Actions 跨平台 Release 流水线发布失败与安装包分发体系
 - **当前 Task**: 
-  - TASK-031: 修复局域网/移动端SSH心跳断连、终端通道死锁泄漏(OpenSSH no more sessions)与一键TMUX无缝恢复 [DONE]
-  - TASK-032: 多终端Tab独立TMUX会话隔离与设备命名空间区分 (Terminal Tab & Device TMUX Session Isolation) [DONE]
-  - TASK-033: 独立 TMUX 会话管理体系（解耦普通终端、远端会话列表可视化与任意交互管理） [DONE]
-  - TASK-034: 修复终端重连无响应与通道复用失效、后台切回自愈与TMUX会话自动续连 [DONE]
-  - TASK-035: TMUX 单会话单终端独占约束与前置会话名识别 (TMUX Single Terminal Enforcement & Prefix Session Title) [DONE]
-  - TASK-036: Android 移动端与全平台 SQLite 本地持久化与凭证持久落盘修复 (Android & Multiplatform SQLite Data & Credential Persistence Fix) [DONE]
+  - TASK-037: 修复 GitHub Actions Release 自动构建与发布失败 (Fix GitHub Actions Release Workflow Failure) [DONE]
 - **当前状态**: DONE
 
 ---
 
 ## 2. 本次会话完成内容
-1. **TMUX 单会话单终端独占与旧终端自动清理 (TASK-035)**:
-   - 在 `terminalStore` 中实现 `openTmuxSession` 与 `closeTmuxTerminals`。
-   - 当用户在 TMUX 会话管理器中点击“进入”或“新建并打开”某个会话时，自动查找该服务器下该 TMUX 会话的全部旧终端，主动调用 `safeInvoke("terminal_close")` 销毁旧底层通道并就地替换/移除，彻底杜绝重复终端累积堆积。
-   - 在 TMUX 管理器中销毁/终止某个会话时，联动清理对应的前端终端标签。
+1. **彻底排查 GitHub Actions 崩溃根因 (TASK-037)**:
+   - 提取 GitHub Action 失败日志，精确定位 Step 9 `Build and Package with Tauri Action` 报错根因：
+     `Error: A public key has been found, but no private key. Make sure to set TAURI_SIGNING_PRIVATE_KEY environment variable.`
+   - 查明 `tauri.conf.json` 配置了 updater pubkey 与 `createUpdaterArtifacts: true`，但在 CI 未配置私钥 Secret 且未传入 `--no-sign` 时，Tauri 打包 `.deb` 完毕后抛出致命异常。
+   - 查明 Ubuntu 22.04+ 缺少 `libfuse2`，导致 Tauri AppImage 打包时内部依赖的 `linuxdeploy-x86_64.AppImage` 无法启动（缺少 `libfuse.so.2`）。
+   - 查明 `workflow_dispatch` 手动触发时 `github.ref_name` 为 `'main'`，导致 release tag 被非法指定为 `'main'`，且用户输入的版本号完全失效。
+   - 查明 `build.sh --apk` 默认 `DO_BUMP=1`，导致在 CI 中构建 Android 时自动自增版本号（`0.1.8` -> `0.1.9`），引发文件名与 Release 标签错位。
 
-2. **TMUX 终端会话名称前置显示与标签栏区分 (TASK-035)**:
-   - 标题格式规范为 `<sessionName> (tmux) [server]`（或无服务器时的 `<sessionName> (tmux)`），确保会话名称排在最首位，杜绝此前被较长的服务器名截断遮盖的缺陷。
-   - 在 `TerminalTabBar` 中为 TMUX 终端添加专属的琥珀色 `Layers` 图标，并在大屏上提升标签宽度上限（`max-w-[140px] sm:max-w-[200px]`）。
-
-3. **Android 移动端应用划掉杀死后数据清空严重缺陷根治 (TASK-036)**:
-   - **根本原因**: `StorageService::default_db_path()` 先前使用 `dirs::data_dir()`，该 crate 在 Android 上无法识别应用沙盒路径返回 `None`，导致创建 `./remora` 权限被拒并静默降级到 `StorageService::new_in_memory()` 内存数据库；`KeyringService` 在缺少 SecretService 的 Android 平台也仅存储在内存 `memory_fallback`，应用进程被系统杀掉后所有数据即刻蒸发。
-   - **Tauri 2 官方沙盒路径支持**: 在 `src-tauri/src/lib.rs` 的 `setup` 阶段，通过 `app.path().app_data_dir()` 获取标准跨平台持久化目录（Android 下为 `/data/user/0/com.remora.app/files`），并在启动时自动检测并平滑迁移旧桌面端数据库文件。
-   - **Keyring 持久化文件回退**: 为 `KeyringService` 引入 `with_data_dir(app_data_dir)`，在 OS Keyring 不可用的 Android 平台将凭据以安全隔离方式自动持久化至沙盒私有文件 `.credentials.dat`，跨进程重启不丢密码。
-
-4. **全量验证与 Android APK 归档**:
-   - `cargo test --manifest-path src-tauri/Cargo.toml`: 25 项单元测试（新增跨进程凭证持久化测试） + 1 项 e2e 测试全数通过。
-   - `pnpm tsc --noEmit`: 前端 0 报错。
-   - `pnpm build`: 生产打包成功。
-   - `./build.sh --apk`: 成功构建通用架构 Release APK：`release/android/remora-universal-release-v0.1.8.apk`。
+2. **工作流多重容灾与全自动化发布增强 (TASK-037)**:
+   - **版本与标签智能解析**: 增加 `Determine Version and Tag` 步骤，无论 push tag `v*` 还是手动 `workflow_dispatch`（默认 `v0.1.8`），均统一规范化导出 `release_tag`。
+   - **签名私钥自动降级**: `${{ secrets.TAURI_SIGNING_PRIVATE_KEY == '' && '--no-sign' || '' }}` 与 `includeUpdaterJson: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}`，在用户尚未配置 GitHub Secret 时优雅打包 `.deb` 与 `AppImage`，一旦配置 Secret 则无缝启用自动更新器签名。
+   - **基础依赖补全**: 增加 `libfuse2 file || libfuse2t64` 安装，彻底打通 AppImage 跨平台打包。
+   - **Android 任务闭环**: 增加 `--no-bump` 锁定版本；共享桌面端创建的 `release_tag` 统一归档；增加已有 NDK 目录优先探测复用；自动上传 APK 与 `SHA256SUMS.txt` 校验和。
+   - **`build.sh` 优化**: 增强环境变量 `TAURI_SIGNING_PRIVATE_KEY` 检测，不再强制依赖本地物理密钥文件。
 
 ---
 
 ## 3. 修改与创建的文件
 - **新建文件**:
-  - `docs/AI/tasks/TASK-035.md`
-  - `docs/AI/tasks/TASK-036.md`
+  - `docs/AI/tasks/TASK-037.md`
 - **修改文件**:
-  - `src/stores/terminalStore.ts`
-  - `src/components/Terminal/TmuxManagerModal.tsx`
-  - `src/components/Terminal/TerminalTabBar.tsx`
-  - `src-tauri/src/storage/db.rs`
-  - `src-tauri/src/security/keyring.rs`
-  - `src-tauri/src/storage/tests.rs`
-  - `src-tauri/src/lib.rs`
+  - `.github/workflows/release.yml`
+  - `build.sh`
   - `docs/AI/TASK_INDEX.md`
   - `docs/AI/SESSION_STATE.md`
 
 ---
 
 ## 4. 已运行的验证命令及结果
-- `cargo test --manifest-path src-tauri/Cargo.toml`: 25 单元测试 + 1 e2e 测试 100% 全部通过。
-- `pnpm tsc --noEmit`: 前端 TypeScript 类型检查 0 报错。
-- `pnpm build`: Vite 生产打包 100% 成功。
-- `./build.sh --apk`: 自动化生成并归档 `release/android/remora-universal-release-v0.1.8.apk`。
+- `pnpm tauri build --bundles deb --no-sign`: 成功生成 `Remora_0.1.8_amd64.deb`，验证 `--no-sign` 参数在缺少私钥时能 100% 成功生成安装包。
+- `pnpm build && cargo check --manifest-path src-tauri/Cargo.toml`: 前端与后端编译 0 报错 100% 成功。
+- `cargo test --manifest-path src-tauri/Cargo.toml`: 25 项单元测试 + 1 项 e2e 测试全数通过。
 
 ---
 
 ## 5. 未解决问题与剩余风险
-- 无。TMUX 会话唯一终端独占、名称前置展示、Android 进程彻底退出后本地配置与凭证 100% 持久恢复均已完全闭环。
+- 无。GitHub Actions 无论通过推送版本标签（如 `git tag v0.1.8 && git push origin v0.1.8`）还是在 GitHub 页面手动触发 `workflow_dispatch`，均可稳定输出桌面端与移动端所有安装包。
+

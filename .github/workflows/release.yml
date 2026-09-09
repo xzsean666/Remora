@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g. v0.1.0)'
+        description: 'Release version (e.g. v0.1.8)'
         required: false
-        default: 'v0.1.0'
+        default: 'v0.1.8'
 
 jobs:
   build-and-release:
@@ -23,9 +23,28 @@ jobs:
             args: '--bundles deb,appimage'
 
     runs-on: ${{ matrix.platform }}
+    outputs:
+      release_tag: ${{ steps.vars.outputs.tag }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Determine Version and Tag
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            INPUT_VER="${{ inputs.version }}"
+            if [ -n "$INPUT_VER" ]; then
+              TAG="$INPUT_VER"
+            else
+              TAG="v$(node -p "require('./package.json').version")"
+            fi
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          [[ "$TAG" =~ ^v ]] || TAG="v$TAG"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Determined release tag: $TAG"
 
       - name: Install pnpm
         uses: pnpm/action-setup@v3
@@ -51,7 +70,7 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev file libfuse2 || sudo apt-get install -y libfuse2t64
 
       - name: Install frontend dependencies
         run: pnpm install
@@ -62,8 +81,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Remora ${{ github.ref_name }}'
+          tagName: ${{ steps.vars.outputs.tag }}
+          releaseName: 'Remora ${{ steps.vars.outputs.tag }}'
           releaseBody: |
             See the assets below to download and install Remora on Ubuntu/Linux and Android mobile devices.
             
@@ -73,16 +92,23 @@ jobs:
             # or
             sudo apt install ./remora_*_amd64.deb
             ```
+
+            ### Desktop Installation via AppImage (Universal Linux):
+            ```bash
+            chmod +x remora_*.AppImage
+            ./remora_*.AppImage
+            ```
             
             ### Mobile Android Installation (手机端安装):
-            Download the Android APK file (`app-universal-release.apk` or `app-arm64-v8a-release.apk`) directly to your phone and tap to install.
+            Download the Android APK file (`remora-universal-release-*.apk` or `remora-*-v*.apk`) directly to your phone and tap to install.
             
             ### Right-Click New Window (Desktop):
             Once installed, right-click the Remora icon in the Ubuntu Dock to open a **New Window**.
             Inside the desktop app, press `Ctrl+Shift+N` to open a new window at any time.
           releaseDraft: false
           prerelease: false
-          args: ${{ matrix.args }}
+          includeUpdaterJson: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+          args: ${{ matrix.args }} ${{ secrets.TAURI_SIGNING_PRIVATE_KEY == '' && '--no-sign' || '' }}
 
   build-android:
     needs: build-and-release
@@ -118,17 +144,26 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install NDK
+      - name: Setup Android NDK
         run: |
-          echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.1.10909125"
-          echo "NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+          if [ -z "${NDK_HOME:-}" ] || [ ! -d "${NDK_HOME:-}" ]; then
+            EXISTING_NDK=$(ls -d $ANDROID_HOME/ndk/* 2>/dev/null | sort -V | tail -n 1 || true)
+            if [ -n "$EXISTING_NDK" ] && [ -d "$EXISTING_NDK" ]; then
+              echo "Found pre-installed NDK at $EXISTING_NDK"
+              echo "NDK_HOME=$EXISTING_NDK" >> $GITHUB_ENV
+            else
+              echo "Installing NDK 26.1.10909125..."
+              echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.1.10909125"
+              echo "NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+            fi
+          fi
 
       - name: Install frontend dependencies
         run: pnpm install
 
       - name: Build Android APK
         run: |
-          ./build.sh --apk
+          ./build.sh --apk --no-bump
 
       - name: Upload Android APKs to Release
         uses: softprops/action-gh-release@v2
@@ -136,6 +171,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ github.ref_name || inputs.version }}
-          files: release/android/*.apk
+          tag_name: ${{ needs.build-and-release.outputs.release_tag }}
+          files: |
+            release/android/*.apk
+            release/android/SHA256SUMS.txt
 

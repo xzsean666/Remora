@@ -504,7 +504,9 @@ if [ ! -f "${KEY_CANDIDATE}" ] && [ -f "/home/sean/.tauri/remora.key" ]; then
   KEY_CANDIDATE="/home/sean/.tauri/remora.key"
 fi
 
-if [ -f "${KEY_CANDIDATE}" ]; then
+if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+  log_info "已载入环境变量中的 Tauri Updater 签名密钥"
+elif [ -f "${KEY_CANDIDATE}" ]; then
   export TAURI_SIGNING_PRIVATE_KEY="$(cat "${KEY_CANDIDATE}")"
   export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}"
   log_info "已载入 Tauri Updater 签名密钥: ${KEY_CANDIDATE}"
