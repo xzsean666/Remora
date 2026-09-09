@@ -20,8 +20,11 @@ where
     }
 }
 
+use std::path::PathBuf;
+
 pub struct KeyringService {
     service_name: String,
+    fallback_file: Option<PathBuf>,
     memory_fallback: RwLock<HashMap<String, String>>,
 }
 
@@ -29,13 +32,50 @@ impl KeyringService {
     pub fn new() -> Self {
         Self {
             service_name: "com.remora.app".to_string(),
+            fallback_file: None,
             memory_fallback: RwLock::new(HashMap::new()),
         }
     }
 
+    pub fn with_data_dir(data_dir: PathBuf) -> Self {
+        let fallback_file = data_dir.join(".credentials.dat");
+        let initial_map = if fallback_file.exists() {
+            match std::fs::read(&fallback_file) {
+                Ok(bytes) => {
+                    serde_json::from_slice::<HashMap<String, String>>(&bytes).unwrap_or_default()
+                }
+                Err(e) => {
+                    warn!("Failed to read fallback credentials file {:?}: {}", fallback_file, e);
+                    HashMap::new()
+                }
+            }
+        } else {
+            HashMap::new()
+        };
+
+        Self {
+            service_name: "com.remora.app".to_string(),
+            fallback_file: Some(fallback_file),
+            memory_fallback: RwLock::new(initial_map),
+        }
+    }
+
+    fn persist_fallback(&self, map: &HashMap<String, String>) {
+        if let Some(ref path) = self.fallback_file {
+            if let Ok(bytes) = serde_json::to_vec(map) {
+                if let Err(e) = std::fs::write(path, bytes) {
+                    warn!("Failed to persist fallback credentials to {:?}: {}", path, e);
+                }
+            }
+        }
+    }
+
     pub fn set_secret(&self, key: &str, secret: &str) -> Result<()> {
-        let mut mem = self.memory_fallback.write().unwrap();
-        mem.insert(key.to_string(), secret.to_string());
+        {
+            let mut mem = self.memory_fallback.write().unwrap();
+            mem.insert(key.to_string(), secret.to_string());
+            self.persist_fallback(&mem);
+        }
 
         let service = self.service_name.clone();
         let key_owned = key.to_string();
@@ -44,7 +84,7 @@ impl KeyringService {
         let _ = run_isolated(move || {
             if let Ok(entry) = keyring::Entry::new(&service, &key_owned) {
                 if let Err(e) = entry.set_password(&secret_owned) {
-                    warn!("OS Keyring set_password failed ({}), using memory fallback", e);
+                    warn!("OS Keyring set_password failed ({}), using fallback", e);
                 } else {
                     debug!("Saved secret to OS keyring for key: {}", key_owned);
                 }
@@ -82,8 +122,11 @@ impl KeyringService {
     }
 
     pub fn delete_secret(&self, key: &str) -> Result<()> {
-        let mut mem = self.memory_fallback.write().unwrap();
-        mem.remove(key);
+        {
+            let mut mem = self.memory_fallback.write().unwrap();
+            mem.remove(key);
+            self.persist_fallback(&mem);
+        }
 
         let service = self.service_name.clone();
         let key_owned = key.to_string();

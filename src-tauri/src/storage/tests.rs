@@ -131,6 +131,35 @@ mod tests {
     }
 
     #[test]
+    fn test_keyring_fallback_file_persistence() {
+        let temp_dir = std::env::temp_dir().join(format!("remora_test_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        {
+            let keyring = KeyringService::with_data_dir(temp_dir.clone());
+            keyring.set_secret("srv-android", "android_secret_999").unwrap();
+            let secret = keyring.get_secret("srv-android").unwrap();
+            assert_eq!(secret, Some("android_secret_999".to_string()));
+        }
+
+        // 模拟应用重启：全新实例化 KeyringService 并指向同一目录
+        {
+            let keyring_reopened = KeyringService::with_data_dir(temp_dir.clone());
+            let secret_recovered = keyring_reopened.get_secret("srv-android").unwrap();
+            assert_eq!(secret_recovered, Some("android_secret_999".to_string()));
+
+            keyring_reopened.delete_secret("srv-android").unwrap();
+        }
+
+        {
+            let keyring_after_del = KeyringService::with_data_dir(temp_dir.clone());
+            assert_eq!(keyring_after_del.get_secret("srv-android").unwrap(), None);
+        }
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
     fn test_quick_snippets_crud_and_groups() {
         let storage = StorageService::new_in_memory().expect("failed to init db");
 

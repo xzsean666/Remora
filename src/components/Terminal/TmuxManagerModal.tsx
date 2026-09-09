@@ -35,9 +35,8 @@ export const TmuxManagerModal: React.FC<TmuxManagerModalProps> = ({
   const { activeServerId, connectedServerName, connectedServerProxy } =
     useConnectionStore();
   const {
-    sessions: termSessions,
-    addSession,
-    setActiveSession,
+    openTmuxSession,
+    closeTmuxTerminals,
     sendDataToActiveTerminal,
   } = useTerminalStore();
   const { setTerminalOpen, setMobileTab, isMobile } = useLayoutStore();
@@ -83,30 +82,16 @@ export const TmuxManagerModal: React.FC<TmuxManagerModalProps> = ({
   if (!isOpen) return null;
 
   const handleEnterSession = (sessionName: string) => {
-    const usedSlots = new Set(
-      termSessions.map((s) => s.slotNumber).filter(Boolean)
-    );
-    let slotNumber = 1;
-    while (usedSlots.has(slotNumber)) slotNumber++;
+    if (!effectiveServerId) return;
 
-    const srvLabel = connectedServerName ? `[${connectedServerName}] ` : "";
-    const newSessionId = `term-tmux-${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2, 6)}`;
-
-    addSession({
-      id: newSessionId,
-      title: `${srvLabel}tmux: ${sessionName}`,
-      serverId: effectiveServerId || "",
+    openTmuxSession({
+      serverId: effectiveServerId,
       serverName: connectedServerName || undefined,
+      sessionName,
       initialDir: rootPath || undefined,
       remoteProxy: connectedServerProxy || undefined,
-      status: "connecting",
-      pendingCommand: `tmux attach -d -t "${sessionName}"\n`,
-      tmuxSessionName: sessionName,
-      slotNumber,
     });
-    setActiveSession(newSessionId);
+
     setTerminalOpen(true);
     if (isMobile) {
       setMobileTab("terminal");
@@ -149,6 +134,8 @@ export const TmuxManagerModal: React.FC<TmuxManagerModalProps> = ({
     setError(null);
     try {
       await killTmuxSession(effectiveServerId, sessionName);
+      // 同步清理已终止会话对应的前端终端标签
+      closeTmuxTerminals(effectiveServerId, sessionName);
       await fetchSessions();
     } catch (err: any) {
       setError(err?.message || "终止会话失败");

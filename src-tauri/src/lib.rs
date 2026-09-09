@@ -667,24 +667,7 @@ async fn install_update(app: tauri::AppHandle) -> Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let db_path = StorageService::default_db_path();
-    let storage = StorageService::new(db_path)
-        .unwrap_or_else(|_| StorageService::new_in_memory().expect("in-memory fallback failed"));
-    let keyring = KeyringService::new();
-    let connection = Arc::new(ConnectionManager::new());
-    let sftp = Arc::new(SftpService::new(connection.clone()));
-    let terminal = TerminalManager::new(connection.clone());
-    let transfer = TransferManager::new(sftp.clone());
-
-    let app_state = Arc::new(AppState {
-        storage,
-        keyring,
-        connection,
-        sftp,
-        terminal,
-        transfer,
-    });
-
+    #[allow(unused_mut)]
     let mut builder = tauri::Builder::default();
     #[cfg(desktop)]
     {
@@ -705,7 +688,60 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .manage(app_state)
+        .setup(|app| {
+            // 获取 Tauri 2 官方标准跨平台应用持久化数据沙盒目录（Android 下为 /data/user/0/com.remora.app/files）
+            let app_data_dir = match app.path().app_data_dir() {
+                Ok(dir) => dir,
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to resolve app_data_dir from Tauri: {}, falling back to default",
+                        e
+                    );
+                    StorageService::default_db_path()
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| std::path::PathBuf::from("."))
+                }
+            };
+
+            if let Err(e) = std::fs::create_dir_all(&app_data_dir) {
+                tracing::warn!("Failed to create app_data_dir {:?}: {}", app_data_dir, e);
+            }
+
+            let db_path = app_data_dir.join("remora.db");
+            StorageService::migrate_legacy_db(&db_path);
+
+            tracing::info!("Initializing Remora SQLite database at: {:?}", db_path);
+            let storage = match StorageService::new(&db_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to open SQLite database at {:?}: {}, falling back to in-memory",
+                        db_path,
+                        e
+                    );
+                    StorageService::new_in_memory().expect("in-memory fallback failed")
+                }
+            };
+
+            let keyring = KeyringService::with_data_dir(app_data_dir);
+            let connection = Arc::new(ConnectionManager::new());
+            let sftp = Arc::new(SftpService::new(connection.clone()));
+            let terminal = TerminalManager::new(connection.clone());
+            let transfer = TransferManager::new(sftp.clone());
+
+            let app_state = Arc::new(AppState {
+                storage,
+                keyring,
+                connection,
+                sftp,
+                terminal,
+                transfer,
+            });
+
+            app.manage(app_state);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             ping,
             create_new_window,

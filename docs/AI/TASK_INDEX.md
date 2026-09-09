@@ -43,22 +43,26 @@
 | **TASK-032** | 多终端Tab独立TMUX会话隔离与设备命名空间区分 (Terminal Tab & Device TMUX Session Isolation) | TASK-031 | **DONE** | `docs/AI/tasks/TASK-032.md` |
 | **TASK-033** | 独立TMUX会话管理体系(解耦普通终端、远端会话列表可视化与任意交互管理) | TASK-031, TASK-032 | **DONE** | `docs/AI/tasks/TASK-033.md` |
 | **TASK-034** | 修复终端重连无响应与通道复用失效、后台切回自愈与TMUX会话自动续连 | TASK-031, TASK-033 | **DONE** | `docs/AI/tasks/TASK-034.md` |
+| **TASK-035** | TMUX 单会话单终端独占约束与前置会话名识别 (TMUX Single Terminal Enforcement & Prefix Session Title) | TASK-033, TASK-034 | **DONE** | `docs/AI/tasks/TASK-035.md` |
+| **TASK-036** | Android 移动端与全平台 SQLite 本地持久化与凭证持久落盘修复 (Android & Multiplatform SQLite Data & Credential Persistence Fix) | TASK-029, TASK-035 | **DONE** | `docs/AI/tasks/TASK-036.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 35
+- **已完成 (DONE)**: 37
 - **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 35
+- **总任务数**: 37
 
 ---
 
 ## 3. 项目执行总结
 
 - Remora 核心功能、远程代理注入、前后端集成、自动化构建发布体系全部就绪。
+- **TASK-035** 圆满完成：实现同一 TMUX 会话全局独占单终端约束。用户在 TMUX 会话列表中点击进入已存在的会话时，自动关闭该会话此前打开的旧终端并释放后端通道，防止终端堆积；终端标题优化为 `<sessionName> (tmux) [server]`，确保会话名置于最前，并在标签栏增加专属琥珀色 `Layers` 图标与宽屏自适应显示。
+- **TASK-036** 圆满完成：彻底根除 Android 移动端进程完全划掉/Kill 退出后配置信息丢失问题。通过 Tauri 2 `app.path().app_data_dir()` 官方路径解析器将 SQLite 数据库与凭证持久化至 Android 应用专属沙盒目录（`/data/user/0/com.remora.app/files`），解决此前 `dirs::data_dir()` 在移动端返回 `None` 导致静默回退至内存数据库的严重缺陷；为 `KeyringService` 增加私有沙盒文件持久化回退，保证移动端 SSH 密码与私钥口令跨进程重启不丢失。
 - **TASK-027** 圆满完成：实现基于 SQLite `ssh_keys` 表的集中式私钥管理，支持 RSA/Ed25519/OpenSSH 内存直接解码与本地文件路径双向兼容，在服务器连接中支持一键选配已存私钥。
 - **TASK-028** 圆满完成：小屏幕与手机端下全自适应三板块 Tab 切换（工作区、代码编辑器、远程终端一次只展示一个板块），文件点击自动跳转编辑器，视口动态自适应虚拟键盘（`100dvh`），并为终端提供专属移动辅助按键栏（Esc, Tab, Ctrl, Alt, 方向键等）。
 - **TASK-029** 圆满完成：完成 Tauri 2 Android Gradle 原生工程初始化，添加后端桌面与移动平台条件编译隔离，并在 GitHub Actions Release 流水线中集成 Android APK 自动打包、签名与发布资产分发。

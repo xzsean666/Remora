@@ -5,52 +5,52 @@
 ---
 
 ## 1. 当前目标与任务
-- **当前 Goal**: 彻底根除移动端/桌面端终端断连无响应假死、Tauri 2 通道注销失效、后台切回无缝自愈与 TMUX 标签页自动重新挂载续接
+- **当前 Goal**: TMUX 单会话单终端独占、会话名前置识别与 Android 移动端进程退出数据/凭据持久化
 - **当前 Task**: 
   - TASK-031: 修复局域网/移动端SSH心跳断连、终端通道死锁泄漏(OpenSSH no more sessions)与一键TMUX无缝恢复 [DONE]
   - TASK-032: 多终端Tab独立TMUX会话隔离与设备命名空间区分 (Terminal Tab & Device TMUX Session Isolation) [DONE]
   - TASK-033: 独立 TMUX 会话管理体系（解耦普通终端、远端会话列表可视化与任意交互管理） [DONE]
   - TASK-034: 修复终端重连无响应与通道复用失效、后台切回自愈与TMUX会话自动续连 [DONE]
+  - TASK-035: TMUX 单会话单终端独占约束与前置会话名识别 (TMUX Single Terminal Enforcement & Prefix Session Title) [DONE]
+  - TASK-036: Android 移动端与全平台 SQLite 本地持久化与凭证持久落盘修复 (Android & Multiplatform SQLite Data & Credential Persistence Fix) [DONE]
 - **当前状态**: DONE
 
 ---
 
 ## 2. 本次会话完成内容
-1. **彻底解决 Reconnect 无响应与 Channel 销毁丢包 (TASK-034)**:
-   - 修复 Tauri 2 `Channel` 生命周期在断开后单例失效（底层注销）的问题。改为在 `startSession` 每次触发时生成崭新通道实例，彻底杜绝输出被前端静默吞没。
-   - `reconnectSession` 不再原地打补丁，而是就地以全新唯一 ID 实例化纯净的 Session，彻底抹除脏 DOM、旧缓冲区乱码和挂死状态，实现秒级重生。
+1. **TMUX 单会话单终端独占与旧终端自动清理 (TASK-035)**:
+   - 在 `terminalStore` 中实现 `openTmuxSession` 与 `closeTmuxTerminals`。
+   - 当用户在 TMUX 会话管理器中点击“进入”或“新建并打开”某个会话时，自动查找该服务器下该 TMUX 会话的全部旧终端，主动调用 `safeInvoke("terminal_close")` 销毁旧底层通道并就地替换/移除，彻底杜绝重复终端累积堆积。
+   - 在 TMUX 管理器中销毁/终止某个会话时，联动清理对应的前端终端标签。
 
-2. **SSH 链路 3 秒快速失败与自动重连自愈**:
-   - `ConnectionManager::open_channel` 超时从 10s 优化为 3s，遇到僵尸网络或静默断开的 TCP 链路快速判定失败，立即清理旧句柄并置为 `Disconnected`。
-   - `terminal_open` 检测到链路断开或握手失败时，自动调用 `do_connect_server` 重新认证建联，无需用户手动返回 Config 列表点击“连接”。
+2. **TMUX 终端会话名称前置显示与标签栏区分 (TASK-035)**:
+   - 标题格式规范为 `<sessionName> (tmux) [server]`（或无服务器时的 `<sessionName> (tmux)`），确保会话名称排在最首位，杜绝此前被较长的服务器名截断遮盖的缺陷。
+   - 在 `TerminalTabBar` 中为 TMUX 终端添加专属的琥珀色 `Layers` 图标，并在大屏上提升标签宽度上限（`max-w-[140px] sm:max-w-[200px]`）。
 
-3. **TMUX 会话标签页自动 re-attach 续连**:
-   - `TerminalSession` 实体持久化记录 `tmuxSessionName`（并兼容从 Tab 标题识别提取）。
-   - 断线重连时自动装配 `pendingCommand: tmux attach -d -t "<name>"\n`，终端连通后自动注入，让用户回到离开前的完整工作现场，绝不回退至普通 Shell。
-   - 悬浮恢复徽章区分普通终端与 TMUX，提供明确的“恢复 TMUX”与“X 关闭”按钮。
+3. **Android 移动端应用划掉杀死后数据清空严重缺陷根治 (TASK-036)**:
+   - **根本原因**: `StorageService::default_db_path()` 先前使用 `dirs::data_dir()`，该 crate 在 Android 上无法识别应用沙盒路径返回 `None`，导致创建 `./remora` 权限被拒并静默降级到 `StorageService::new_in_memory()` 内存数据库；`KeyringService` 在缺少 SecretService 的 Android 平台也仅存储在内存 `memory_fallback`，应用进程被系统杀掉后所有数据即刻蒸发。
+   - **Tauri 2 官方沙盒路径支持**: 在 `src-tauri/src/lib.rs` 的 `setup` 阶段，通过 `app.path().app_data_dir()` 获取标准跨平台持久化目录（Android 下为 `/data/user/0/com.remora.app/files`），并在启动时自动检测并平滑迁移旧桌面端数据库文件。
+   - **Keyring 持久化文件回退**: 为 `KeyringService` 引入 `with_data_dir(app_data_dir)`，在 OS Keyring 不可用的 Android 平台将凭据以安全隔离方式自动持久化至沙盒私有文件 `.credentials.dat`，跨进程重启不丢密码。
 
-4. **App 回到前台生命周期监听与自动自愈**:
-   - 在 `App.tsx` 中监听 `visibilitychange` 与 `focus` 事件，当应用从后台唤醒或手机亮屏时，自动同步连接状态；若活动终端已断开，立即发起无感自愈重连。
-
-5. **全量验证与 APK 归档**:
-   - `cargo test --manifest-path src-tauri/Cargo.toml`: 24 单元测试 + 1 e2e 测试全数通过。
+4. **全量验证与 Android APK 归档**:
+   - `cargo test --manifest-path src-tauri/Cargo.toml`: 25 项单元测试（新增跨进程凭证持久化测试） + 1 项 e2e 测试全数通过。
    - `pnpm tsc --noEmit`: 前端 0 报错。
    - `pnpm build`: 生产打包成功。
-   - 版本平滑递增至 `0.1.7`。
+   - `./build.sh --apk`: 成功构建通用架构 Release APK：`release/android/remora-universal-release-v0.1.8.apk`。
 
 ---
 
 ## 3. 修改与创建的文件
 - **新建文件**:
-  - `docs/AI/tasks/TASK-034.md`
+  - `docs/AI/tasks/TASK-035.md`
+  - `docs/AI/tasks/TASK-036.md`
 - **修改文件**:
-  - `src/components/Terminal/XtermView.tsx`
   - `src/stores/terminalStore.ts`
   - `src/components/Terminal/TmuxManagerModal.tsx`
   - `src/components/Terminal/TerminalTabBar.tsx`
-  - `src/App.tsx`
-  - `src-tauri/src/terminal/session.rs`
-  - `src-tauri/src/connection/manager.rs`
+  - `src-tauri/src/storage/db.rs`
+  - `src-tauri/src/security/keyring.rs`
+  - `src-tauri/src/storage/tests.rs`
   - `src-tauri/src/lib.rs`
   - `docs/AI/TASK_INDEX.md`
   - `docs/AI/SESSION_STATE.md`
@@ -58,12 +58,12 @@
 ---
 
 ## 4. 已运行的验证命令及结果
-- `cargo test --manifest-path src-tauri/Cargo.toml`: 24 组单元测试 + 1 组 e2e 测试 100% 全部通过。
+- `cargo test --manifest-path src-tauri/Cargo.toml`: 25 单元测试 + 1 e2e 测试 100% 全部通过。
 - `pnpm tsc --noEmit`: 前端 TypeScript 类型检查 0 报错。
 - `pnpm build`: Vite 生产打包 100% 成功。
-- `./build.sh --apk`: 自动化版本递增至 `v0.1.7`。
+- `./build.sh --apk`: 自动化生成并归档 `release/android/remora-universal-release-v0.1.8.apk`。
 
 ---
 
 ## 5. 未解决问题与剩余风险
-- 无。终端断线重连、通道注销自愈、TMUX 现场无缝恢复与切出切回自动恢复全链路闭环。
+- 无。TMUX 会话唯一终端独占、名称前置展示、Android 进程彻底退出后本地配置与凭证 100% 持久恢复均已完全闭环。

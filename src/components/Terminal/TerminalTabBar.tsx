@@ -101,7 +101,13 @@ export const TerminalTabBar: React.FC<TerminalTabBarProps> = ({
                 }`}
               />
 
-              <span className="truncate max-w-[140px]" title={`${session.title} (${statusTooltip})`}>
+              {session.tmuxSessionName && (
+                <span title={`TMUX 会话: ${session.tmuxSessionName}`} className="flex-shrink-0 flex items-center">
+                  <Layers className="w-3 h-3 text-amber-400" />
+                </span>
+              )}
+
+              <span className="truncate max-w-[140px] sm:max-w-[200px]" title={`${session.title} (${statusTooltip})`}>
                 {session.title}
               </span>
 

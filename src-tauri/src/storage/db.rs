@@ -35,10 +35,46 @@ impl StorageService {
     }
 
     pub fn default_db_path() -> PathBuf {
-        let base_dir = dirs::data_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("remora");
-        base_dir.join("remora.db")
+        if let Some(data_dir) = dirs::data_dir() {
+            data_dir.join("remora").join("remora.db")
+        } else {
+            // Android 移动端沙盒数据目录后备
+            let p1 = PathBuf::from("/data/user/0/com.remora.app/files");
+            let p2 = PathBuf::from("/data/data/com.remora.app/files");
+            if p1.exists() {
+                p1.join("remora.db")
+            } else if p2.exists() {
+                p2.join("remora.db")
+            } else {
+                PathBuf::from(".").join("remora").join("remora.db")
+            }
+        }
+    }
+
+    pub fn migrate_legacy_db(target: &std::path::Path) {
+        if target.exists() {
+            return;
+        }
+        if let Some(data_dir) = dirs::data_dir() {
+            let legacy = data_dir.join("remora").join("remora.db");
+            if legacy.exists() && legacy != target {
+                if let Some(parent) = target.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if let Err(e) = std::fs::copy(&legacy, target) {
+                    tracing::warn!("Failed to copy legacy database from {:?} to {:?}: {}", legacy, target, e);
+                } else {
+                    tracing::info!("Successfully migrated legacy database from {:?} to {:?}", legacy, target);
+                    let legacy_wal = data_dir.join("remora").join("remora.db-wal");
+                    let target_wal = target.with_extension("db-wal");
+                    let _ = std::fs::copy(&legacy_wal, &target_wal);
+
+                    let legacy_shm = data_dir.join("remora").join("remora.db-shm");
+                    let target_shm = target.with_extension("db-shm");
+                    let _ = std::fs::copy(&legacy_shm, &target_shm);
+                }
+            }
+        }
     }
 
     fn init_tables(&self) -> Result<()> {
