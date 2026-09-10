@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { X, Check, Folder } from "lucide-react";
+import { formatErrorMessage } from "../../../utils/tauriBridge";
 
 interface GroupModalProps {
   isOpen: boolean;
@@ -40,7 +41,7 @@ export const GroupModal: React.FC<GroupModalProps> = ({
       await onConfirm(name.trim());
       onClose();
     } catch (err: any) {
-      setError(err?.message || "操作失败");
+      setError(formatErrorMessage(err) || "操作失败");
     } finally {
       setLoading(false);
     }

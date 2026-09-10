@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { X, FileUp, Check, Layers, AlertTriangle, Sparkles } from "lucide-react";
-import { QuickSnippet } from "../../../utils/tauriBridge";
+import { QuickSnippet, formatErrorMessage } from "../../../utils/tauriBridge";
 
 interface ImportSnippetModalProps {
   isOpen: boolean;
@@ -40,7 +40,7 @@ export const ImportSnippetModal: React.FC<ImportSnippetModalProps> = ({
       await onConfirm(parsedSnippets, overwrite);
       onClose();
     } catch (err: any) {
-      setError(err?.message || "导入失败，请检查数据格式");
+      setError(formatErrorMessage(err) || "导入失败，请检查数据格式");
     } finally {
       setIsSubmitting(false);
     }

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { safeInvoke as invoke, isRunningInTauri } from "../utils/tauriBridge";
+import { safeInvoke as invoke, isRunningInTauri, formatErrorMessage } from "../utils/tauriBridge";
 import { listen } from "@tauri-apps/api/event";
 
 export type ConnectionStatus =
@@ -298,7 +298,7 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
       await invoke("reconnect_server", { serverId: targetId });
     } catch (err) {
       console.error("Failed to trigger reconnect:", err);
-      get().setServerState(targetId, "failed", { error: String(err) });
+      get().setServerState(targetId, "failed", { error: formatErrorMessage(err) });
     }
   },
 

@@ -16,6 +16,7 @@ import {
   killTmuxSession,
   createTmuxSession,
   TmuxSessionInfo,
+  formatErrorMessage,
 } from "../../utils/tauriBridge";
 import { useTerminalStore } from "../../stores/terminalStore";
 import { useConnectionStore } from "../../stores/connectionStore";
@@ -67,7 +68,7 @@ export const TmuxManagerModal: React.FC<TmuxManagerModalProps> = ({
         setError(res.error);
       }
     } catch (err: any) {
-      setError(err?.message || "获取 TMUX 会话列表失败");
+      setError(formatErrorMessage(err) || "获取 TMUX 会话列表失败");
     } finally {
       setLoading(false);
     }
@@ -117,7 +118,7 @@ export const TmuxManagerModal: React.FC<TmuxManagerModalProps> = ({
         await fetchSessions();
       }
     } catch (err: any) {
-      setError(err?.message || "创建 TMUX 会话失败");
+      setError(formatErrorMessage(err) || "创建 TMUX 会话失败");
     } finally {
       setIsCreating(false);
     }
@@ -138,7 +139,7 @@ export const TmuxManagerModal: React.FC<TmuxManagerModalProps> = ({
       closeTmuxTerminals(effectiveServerId, sessionName);
       await fetchSessions();
     } catch (err: any) {
-      setError(err?.message || "终止会话失败");
+      setError(formatErrorMessage(err) || "终止会话失败");
     } finally {
       setDeletingName(null);
     }

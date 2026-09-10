@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { X, Check, FolderPlus, Terminal, Sparkles } from "lucide-react";
-import { QuickSnippet } from "../../../utils/tauriBridge";
+import { QuickSnippet, formatErrorMessage } from "../../../utils/tauriBridge";
 
 interface SnippetEditModalProps {
   isOpen: boolean;
@@ -97,7 +97,7 @@ export const SnippetEditModal: React.FC<SnippetEditModalProps> = ({
       await onSave(payload);
       onClose();
     } catch (err: any) {
-      setError(err?.message || "Failed to save quick input.");
+      setError(formatErrorMessage(err) || "Failed to save quick input.");
     } finally {
       setIsSubmitting(false);
     }

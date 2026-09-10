@@ -4,7 +4,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Channel } from "@tauri-apps/api/core";
 import { RotateCcw, RefreshCw, X } from "lucide-react";
-import { safeInvoke } from "../../utils/tauriBridge";
+import { safeInvoke, formatErrorMessage } from "../../utils/tauriBridge";
 import { TerminalSession, useTerminalStore } from "../../stores/terminalStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 
@@ -205,7 +205,7 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
           console.error("Failed to open terminal session:", err);
           updateSessionStatus(session.id, "disconnected");
           updateBackendSessionId(session.id, null);
-          term.writeln(`\r\n\x1b[31m[Remora] Error opening terminal: ${err}\x1b[0m`);
+          term.writeln(`\r\n\x1b[31m[Remora] Error opening terminal: ${formatErrorMessage(err)}\x1b[0m`);
           term.writeln("\x1b[33mPress [Enter] or click 'Reconnect' to retry.\x1b[0m\r\n");
         });
     };

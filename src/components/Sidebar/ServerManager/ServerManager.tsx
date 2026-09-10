@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { safeInvoke as invoke, isRunningInTauri } from "../../../utils/tauriBridge";
+import { safeInvoke as invoke, isRunningInTauri, formatErrorMessage } from "../../../utils/tauriBridge";
 import {
   Server,
   Plus,
@@ -220,7 +220,7 @@ export const ServerManager: React.FC = () => {
       setShowAddModal(false);
       resetForm();
     } catch (err) {
-      alert(`Failed to save server: ${String(err)}`);
+      alert(`Failed to save server: ${formatErrorMessage(err)}`);
     }
   };
 
@@ -234,8 +234,8 @@ export const ServerManager: React.FC = () => {
         setActiveServerId(srv.id);
       }
     } catch (err) {
-      setServerState(srv.id, "failed", { error: String(err) });
-      alert(`SSH Connection to ${srv.name} failed: ${String(err)}`);
+      setServerState(srv.id, "failed", { error: formatErrorMessage(err) });
+      alert(`SSH Connection to ${srv.name} failed: ${formatErrorMessage(err)}`);
     } finally {
       setConnectingId(null);
     }

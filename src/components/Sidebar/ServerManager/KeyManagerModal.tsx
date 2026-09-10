@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Key, Plus, Trash2, X, Upload, Shield, Check, Lock, AlertCircle } from "lucide-react";
 import { useSshKeyStore } from "../../../stores/sshKeyStore";
-import type { SshKey } from "../../../utils/tauriBridge";
+import { formatErrorMessage, type SshKey } from "../../../utils/tauriBridge";
 
 interface KeyManagerModalProps {
   isOpen: boolean;
@@ -87,7 +87,7 @@ export const KeyManagerModal: React.FC<KeyManagerModalProps> = ({
         onSelectKey(newKey.id);
       }
     } catch (err: any) {
-      setErrorMsg(err?.message || "Failed to save private key");
+      setErrorMsg(formatErrorMessage(err) || "Failed to save private key");
     }
   };
 

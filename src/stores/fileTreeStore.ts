@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { safeInvoke as invoke } from "../utils/tauriBridge";
+import { safeInvoke as invoke, formatErrorMessage } from "../utils/tauriBridge";
 
 export interface FileEntry {
   name: string;
@@ -206,7 +206,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       });
     } catch (err) {
       console.error(`Failed to read directory ${dirPath}:`, err);
-      const errMsg = String(err).replace(/^Error:\s*/, "");
+      const errMsg = formatErrorMessage(err).replace(/^Error:\s*/, "");
       set((state) => ({
         loadingPaths: state.loadingPaths.filter((p) => p !== dirPath),
         dirErrors: { ...state.dirErrors, [dirPath]: errMsg },

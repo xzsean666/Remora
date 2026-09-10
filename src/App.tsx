@@ -15,7 +15,7 @@ import { useEditorStore } from "./stores/editorStore";
 import { useFileTreeStore } from "./stores/fileTreeStore";
 import { useConnectionStore } from "./stores/connectionStore";
 import { useTerminalStore } from "./stores/terminalStore";
-import { createNewWindow, checkUpdate, installUpdate, type UpdateInfo } from "./utils/tauriBridge";
+import { createNewWindow, checkUpdate, installUpdate, formatErrorMessage, type UpdateInfo } from "./utils/tauriBridge";
 
 export default function App() {
   const {
@@ -179,7 +179,7 @@ export default function App() {
                       setManualCheckMsg("Remora is up to date (v0.1.0)");
                     }
                   } catch (err: any) {
-                    setManualCheckMsg("Failed to check updates: " + (err?.message || err));
+                    setManualCheckMsg("Failed to check updates: " + formatErrorMessage(err));
                   }
                 }}
                 className="px-3 py-1.5 bg-vscode-hover text-vscode-textBright rounded border border-vscode-border hover:bg-vscode-selected hover:text-white transition-all text-xs w-fit"
@@ -219,7 +219,7 @@ export default function App() {
                 try {
                   await installUpdate();
                 } catch (e: any) {
-                  alert("Update failed: " + (e?.message || e));
+                  alert("Update failed: " + formatErrorMessage(e));
                   setIsUpdating(false);
                 }
               }}

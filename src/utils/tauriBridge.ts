@@ -135,12 +135,78 @@ function saveMockServers(servers: ServerConfig[]) {
 }
 
 /**
+ * Formats any error value (Rust AppError, Error instance, string, or arbitrary object)
+ * into a clear, human-readable string without ever displaying "[object Object]".
+ */
+export function formatErrorMessage(err: unknown): string {
+  if (err === null || err === undefined) {
+    return "Unknown error";
+  }
+  if (typeof err === "string") {
+    return err.trim();
+  }
+  if (err instanceof Error) {
+    return (err.message || err.toString() || "Unknown error").trim();
+  }
+  if (typeof err === "object") {
+    const obj = err as Record<string, any>;
+    // Check common error object properties
+    if (typeof obj.message === "string" && obj.message.trim()) {
+      return obj.message.trim();
+    }
+    if (typeof obj.error === "string" && obj.error.trim()) {
+      return obj.error.trim();
+    }
+    if (typeof obj.details === "string" && obj.details.trim()) {
+      return obj.details.trim();
+    }
+
+    // Check if it's a Rust Serde enum variant: e.g. { Connection: "connection refused" }
+    const keys = Object.keys(obj);
+    if (keys.length === 1) {
+      const key = keys[0];
+      const val = obj[key];
+      if (typeof val === "string") {
+        return `${key} error: ${val}`.trim();
+      }
+      if (val && typeof val === "object") {
+        return `${key}: ${formatErrorMessage(val)}`.trim();
+      }
+    }
+
+    // Attempt JSON serialization if non-empty
+    try {
+      const json = JSON.stringify(err);
+      if (json && json !== "{}") {
+        return json;
+      }
+    } catch {}
+  }
+
+  try {
+    const str = String(err);
+    return str === "[object Object]" ? "An unknown error occurred" : str;
+  } catch {
+    return "An unknown error occurred";
+  }
+}
+
+/**
  * Safe invoke wrapper that transparently falls back to localStorage/mock
  * when running in standard browser preview mode (http://localhost:1420/).
+ * Also wraps rejections with clean human-readable error messages.
  */
 export async function safeInvoke<T = any>(cmd: string, args?: Record<string, any>): Promise<T> {
   if (isRunningInTauri()) {
-    return await tauriInvoke<T>(cmd, args);
+    try {
+      return await tauriInvoke<T>(cmd, args);
+    } catch (err: any) {
+      const msg = formatErrorMessage(err);
+      const customErr = new Error(msg);
+      (customErr as any).raw = err;
+      customErr.toString = () => msg;
+      throw customErr;
+    }
   }
 
   // Running in standard web browser (e.g. Chrome at http://localhost:1420/)

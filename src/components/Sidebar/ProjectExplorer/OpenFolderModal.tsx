@@ -16,7 +16,7 @@ import {
   CornerDownRight,
   Compass,
 } from "lucide-react";
-import { safeInvoke as invoke } from "../../../utils/tauriBridge";
+import { safeInvoke as invoke, formatErrorMessage } from "../../../utils/tauriBridge";
 import { useFileTreeStore, RecentProject, FileEntry } from "../../../stores/fileTreeStore";
 import { useConnectionStore } from "../../../stores/connectionStore";
 import { useLayoutStore } from "../../../stores/layoutStore";
@@ -144,7 +144,7 @@ export const OpenFolderModal: React.FC<OpenFolderModalProps> = ({
         setPathInput(targetPath);
       } catch (err) {
         console.error(`Failed to read remote directory ${targetPath}:`, err);
-        setBrowserError(String(err).replace(/^Error:\s*/, ""));
+        setBrowserError(formatErrorMessage(err).replace(/^Error:\s*/, ""));
       } finally {
         setIsLoadingBrowser(false);
       }
@@ -214,8 +214,8 @@ export const OpenFolderModal: React.FC<OpenFolderModalProps> = ({
       setServerState(selectedServerId, "connected");
       await loadDirectory(selectedServerId, pathInput || currentBrowsePath);
     } catch (err) {
-      setServerState(selectedServerId, "failed", { error: String(err) });
-      alert(`Failed to connect to ${currentMeta?.name || selectedServerId}: ${String(err)}`);
+      setServerState(selectedServerId, "failed", { error: formatErrorMessage(err) });
+      alert(`Failed to connect to ${currentMeta?.name || selectedServerId}: ${formatErrorMessage(err)}`);
     } finally {
       setIsConnecting(false);
     }
@@ -249,8 +249,8 @@ export const OpenFolderModal: React.FC<OpenFolderModalProps> = ({
           await invoke("connect_server", { serverId: srvId });
           setServerState(srvId, "connected");
         } catch (err) {
-          setServerState(srvId, "failed", { error: String(err) });
-          alert(`Failed to connect to ${targetServerMeta?.name || srvId}: ${String(err)}`);
+          setServerState(srvId, "failed", { error: formatErrorMessage(err) });
+          alert(`Failed to connect to ${targetServerMeta?.name || srvId}: ${formatErrorMessage(err)}`);
           setIsConnecting(false);
           return;
         }
@@ -261,7 +261,7 @@ export const OpenFolderModal: React.FC<OpenFolderModalProps> = ({
       await setRoot(srvId, cleanPath, targetServerMeta?.name);
       onClose();
     } catch (err) {
-      alert(`Failed to open directory ${cleanPath}: ${String(err)}`);
+      alert(`Failed to open directory ${cleanPath}: ${formatErrorMessage(err)}`);
     } finally {
       setIsConnecting(false);
     }

@@ -414,6 +414,14 @@ if [ "$BUILD_MODE" = "apk" ]; then
     TAURI_ANDROID_ARGS+=("--debug")
   fi
 
+  # 确保 Android 图标资源已同步到原生工程
+  if [ -d "${SCRIPT_DIR}/src-tauri/icons/android" ] && [ -d "${SCRIPT_DIR}/src-tauri/gen/android/app/src/main/res" ]; then
+    log_info "同步 Android 原生应用图标与自适应资源..."
+    rm -f "${SCRIPT_DIR}/src-tauri/gen/android/app/src/main/res/drawable/ic_launcher_background.xml" \
+          "${SCRIPT_DIR}/src-tauri/gen/android/app/src/main/res/drawable-v24/ic_launcher_foreground.xml" 2>/dev/null || true
+    cp -rf "${SCRIPT_DIR}/src-tauri/icons/android/"* "${SCRIPT_DIR}/src-tauri/gen/android/app/src/main/res/"
+  fi
+
   log_info "执行构建命令: pnpm tauri ${TAURI_ANDROID_ARGS[*]}"
   pnpm tauri "${TAURI_ANDROID_ARGS[@]}"
 

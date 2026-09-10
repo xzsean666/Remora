@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { safeInvoke as invoke } from "../utils/tauriBridge";
+import { safeInvoke as invoke, formatErrorMessage } from "../utils/tauriBridge";
 
 export interface EditorTab {
   serverId: string;
@@ -217,7 +217,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
       return false;
     } catch (err: unknown) {
-      const errorMessage = typeof err === "string" ? err : (err as Error)?.message || String(err);
+      const errorMessage = formatErrorMessage(err);
       if (errorMessage.includes("Conflict detected")) {
         set({
           conflictInfo: {

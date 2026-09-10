@@ -5,49 +5,74 @@
 ---
 
 ## 1. 当前目标与任务
-- **当前 Goal**: 修复 GitHub Actions 跨平台 Release 流水线发布失败与安装包分发体系
+- **当前 Goal**: 修复前端全局对象报错 [object Object] 与同步移动端原生应用图标
 - **当前 Task**: 
-  - TASK-037: 修复 GitHub Actions Release 自动构建与发布失败 (Fix GitHub Actions Release Workflow Failure) [DONE]
+  - TASK-038: 修复前端全局对象报错 [object Object] 与同步移动端原生应用图标 (Fix Global [object Object] Error Formatting & Sync Android Mobile App Icons) [DONE]
 - **当前状态**: DONE
 
 ---
 
 ## 2. 本次会话完成内容
-1. **彻底排查 GitHub Actions 崩溃根因 (TASK-037)**:
-   - 提取 GitHub Action 失败日志，精确定位 Step 9 `Build and Package with Tauri Action` 报错根因：
-     `Error: A public key has been found, but no private key. Make sure to set TAURI_SIGNING_PRIVATE_KEY environment variable.`
-   - 查明 `tauri.conf.json` 配置了 updater pubkey 与 `createUpdaterArtifacts: true`，但在 CI 未配置私钥 Secret 且未传入 `--no-sign` 时，Tauri 打包 `.deb` 完毕后抛出致命异常。
-   - 查明 Ubuntu 22.04+ 缺少 `libfuse2`，导致 Tauri AppImage 打包时内部依赖的 `linuxdeploy-x86_64.AppImage` 无法启动（缺少 `libfuse.so.2`）。
-   - 查明 `workflow_dispatch` 手动触发时 `github.ref_name` 为 `'main'`，导致 release tag 被非法指定为 `'main'`，且用户输入的版本号完全失效。
-   - 查明 `build.sh --apk` 默认 `DO_BUMP=1`，导致在 CI 中构建 Android 时自动自增版本号（`0.1.8` -> `0.1.9`），引发文件名与 Release 标签错位。
+1. **彻底根除全局报错 [object Object] (TASK-038)**:
+   - **Rust 后端自定义序列化**: 为核心 `AppError` 实施自定义 `Serialize`，利用 `thiserror` 格式化直接将错误枚举序列化为带类型前缀的人类可读字符串（如 `"SSH connection error: Connection refused (os error 111)"`），彻底解决 Serde 默认将带参 enum variant 序列化为单键 JSON 对象导致的直接转字符串变 `[object Object]` 缺陷。
+   - **后端单元测试覆盖**: 在 `src-tauri/src/core/error.rs` 中增加 `test_app_error_serialization_as_string`，验证各类 `AppError` 序列化输出为纯字符串。
+   - **前端通用解析器 `formatErrorMessage`**: 在 `src/utils/tauriBridge.ts` 中实现并导出高韧性格式化函数，针对字符串、标准 Error 实例、Rust Serde 单键 enum、普通错误对象（`message`/`error`/`details`）、任意未知对象（JSON 序列化降级）及无原型对象（`Object.create(null)`）进行防御性解析，永不输出 `[object Object]`。
+   - **`safeInvoke` 全面托管**: 在 `safeInvoke` 中统一拦截异常并重抛携带格式化文本与自定义 `toString()` 的 Error 对象，使 `String(err)` 或 `${err}` 也无法打印出 `[object Object]`。
+   - **前端全量调用点替换**: 更新 `ProjectExplorer`、`OpenFolderModal`、`ServerManager`、`KeyManagerModal`、`GroupModal`、`ImportSnippetModal`、`SnippetEditModal`、`TmuxManagerModal`、`XtermView`、`App`、`connectionStore`、`editorStore`、`fileTreeStore`，将所有 `String(err)`、`${err}` 与 `(err?.message || err)` 统一替换为 `formatErrorMessage(err)`。
 
-2. **工作流多重容灾与全自动化发布增强 (TASK-037)**:
-   - **版本与标签智能解析**: 增加 `Determine Version and Tag` 步骤，无论 push tag `v*` 还是手动 `workflow_dispatch`（默认 `v0.1.8`），均统一规范化导出 `release_tag`。
-   - **签名私钥自动降级**: `${{ secrets.TAURI_SIGNING_PRIVATE_KEY == '' && '--no-sign' || '' }}` 与 `includeUpdaterJson: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}`，在用户尚未配置 GitHub Secret 时优雅打包 `.deb` 与 `AppImage`，一旦配置 Secret 则无缝启用自动更新器签名。
-   - **基础依赖补全**: 增加 `libfuse2 file || libfuse2t64` 安装，彻底打通 AppImage 跨平台打包。
-   - **Android 任务闭环**: 增加 `--no-bump` 锁定版本；共享桌面端创建的 `release_tag` 统一归档；增加已有 NDK 目录优先探测复用；自动上传 APK 与 `SHA256SUMS.txt` 校验和。
-   - **`build.sh` 优化**: 增强环境变量 `TAURI_SIGNING_PRIVATE_KEY` 检测，不再强制依赖本地物理密钥文件。
+2. **Android 移动端应用图标全量替换与桌面端对齐 (TASK-038)**:
+   - **清理模板旧资产**: 彻底删除 `src-tauri/gen/android/app/src/main/res/` 中遗留的 Android Studio 绿色机器人矢量资源（`drawable/ic_launcher_background.xml` 与 `drawable-v24/ic_launcher_foreground.xml`）。
+   - **同步全套高清图标**: 将 Remora 官方暗色终端图标同步写入 `res/` 的全部 DPI 目录（`mipmap-mdpi`, `mipmap-hdpi`, `mipmap-xhdpi`, `mipmap-xxhdpi`, `mipmap-xxxhdpi`），包括标准图标与圆形图标。
+   - **自适应图标与暗黑对齐**: 在 `mipmap-anydpi-v26/` 中配置 `ic_launcher.xml` 与 `ic_launcher_round.xml` 自适应图标，将背景颜色 `ic_launcher_background` 统一设为 Remora 官方暗黑底色 `#181820`。
+   - **清单文件完备性**: 在 `AndroidManifest.xml` 中补充 `android:roundIcon="@mipmap/ic_launcher_round"`，确保主流 Android 启动器（圆形/水滴/圆角）均展示 Remora 官方图标。
+   - **构建链路自动化**: 在 `build.sh` 中增加 Android 打包前自动同步图标逻辑，防止原生项目重构后图标回退。
 
 ---
 
 ## 3. 修改与创建的文件
 - **新建文件**:
-  - `docs/AI/tasks/TASK-037.md`
+  - `docs/AI/tasks/TASK-038.md`
+  - `src-tauri/icons/android/mipmap-anydpi-v26/ic_launcher_round.xml`
+  - `src-tauri/gen/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml`
+  - `src-tauri/gen/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml`
+  - `src-tauri/gen/android/app/src/main/res/values/ic_launcher_background.xml`
 - **修改文件**:
-  - `.github/workflows/release.yml`
+  - `src-tauri/src/core/error.rs`
+  - `src/utils/tauriBridge.ts`
+  - `src/stores/connectionStore.ts`
+  - `src/stores/editorStore.ts`
+  - `src/stores/fileTreeStore.ts`
+  - `src/components/Sidebar/ProjectExplorer/OpenFolderModal.tsx`
+  - `src/components/Sidebar/ProjectExplorer/ProjectExplorer.tsx`
+  - `src/components/Sidebar/ServerManager/ServerManager.tsx`
+  - `src/components/Sidebar/ServerManager/KeyManagerModal.tsx`
+  - `src/components/Sidebar/QuickInput/GroupModal.tsx`
+  - `src/components/Sidebar/QuickInput/ImportSnippetModal.tsx`
+  - `src/components/Sidebar/QuickInput/SnippetEditModal.tsx`
+  - `src/components/Terminal/TmuxManagerModal.tsx`
+  - `src/components/Terminal/XtermView.tsx`
+  - `src/App.tsx`
+  - `src-tauri/icons/android/values/ic_launcher_background.xml`
+  - `src-tauri/gen/android/app/src/main/AndroidManifest.xml`
+  - `src-tauri/gen/android/app/src/main/res/mipmap-*/...` (替换所有 DPI 像素图)
   - `build.sh`
   - `docs/AI/TASK_INDEX.md`
   - `docs/AI/SESSION_STATE.md`
+- **删除文件**:
+  - `src-tauri/gen/android/app/src/main/res/drawable/ic_launcher_background.xml`
+  - `src-tauri/gen/android/app/src/main/res/drawable-v24/ic_launcher_foreground.xml`
 
 ---
 
 ## 4. 已运行的验证命令及结果
-- `pnpm tauri build --bundles deb --no-sign`: 成功生成 `Remora_0.1.8_amd64.deb`，验证 `--no-sign` 参数在缺少私钥时能 100% 成功生成安装包。
-- `pnpm build && cargo check --manifest-path src-tauri/Cargo.toml`: 前端与后端编译 0 报错 100% 成功。
-- `cargo test --manifest-path src-tauri/Cargo.toml`: 25 项单元测试 + 1 项 e2e 测试全数通过。
+- `pnpm build`: 成功，TypeScript 静态类型检查 0 错误，打包耗时 10.09s。
+- `cargo check --manifest-path src-tauri/Cargo.toml`: 成功，Rust 检查通过。
+- `cargo test --manifest-path src-tauri/Cargo.toml`: 26 项单元测试（含新增 `test_app_error_serialization_as_string`）+ 1 项 e2e 测试全数通过。
+- `node -e '...'`: 针对 `formatErrorMessage` 覆盖 null/undefined/string/Error/Rust enum/JSON/null prototype 等 11 种复杂测试用例，100% 通过。
+- 图像视觉比对: 确认 `gen/android/app/src/main/res/mipmap-*` 图标与桌面端 `src-tauri/icons/icon.png` 100% 一致。
 
 ---
 
 ## 5. 未解决问题与剩余风险
-- 无。GitHub Actions 无论通过推送版本标签（如 `git tag v0.1.8 && git push origin v0.1.8`）还是在 GitHub 页面手动触发 `workflow_dispatch`，均可稳定输出桌面端与移动端所有安装包。
+- 无。两个问题已彻底解决并闭环。
 

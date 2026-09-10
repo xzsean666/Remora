@@ -26,7 +26,7 @@ import { FileTreeNode } from "./FileTreeNode";
 import { NewItemInput } from "./NewItemInput";
 import { ContextMenu } from "../ContextMenu";
 import { OpenFolderModal } from "./OpenFolderModal";
-import { safeInvoke as invoke, isRunningInTauri } from "../../../utils/tauriBridge";
+import { safeInvoke as invoke, isRunningInTauri, formatErrorMessage } from "../../../utils/tauriBridge";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useTransferStore } from "../../../stores/transferStore";
 import { FileConflictModal, FileConflictItem } from "./FileConflictModal";
@@ -361,8 +361,8 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
       setServerState(srvId, "connected");
       setActiveServerId(srvId);
     } catch (err) {
-      setServerState(srvId, "failed", { error: String(err) });
-      alert(`Connection failed: ${String(err)}`);
+      setServerState(srvId, "failed", { error: formatErrorMessage(err) });
+      alert(`Connection failed: ${formatErrorMessage(err)}`);
     } finally {
       setConnectingServerId(null);
     }
@@ -381,8 +381,8 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
         await invoke("connect_server", { serverId });
         setServerState(serverId, "connected");
       } catch (err) {
-        setServerState(serverId, "failed", { error: String(err) });
-        alert(`Failed to connect to ${serverName || serverId}: ${String(err)}`);
+        setServerState(serverId, "failed", { error: formatErrorMessage(err) });
+        alert(`Failed to connect to ${serverName || serverId}: ${formatErrorMessage(err)}`);
         setConnectingServerId(null);
         return;
       }
