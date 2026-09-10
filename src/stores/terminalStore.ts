@@ -196,8 +196,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   updateBackendSessionId: (id, backendId) => {
     set((state) => {
       const session = state.sessions.find((s) => s.id === id);
-      const pending = session?.pendingCommand;
+      let pending = session?.pendingCommand;
+      if (!pending && session?.tmuxSessionName) {
+        pending = `tmux attach -d -t "${session.tmuxSessionName}"\n`;
+      }
       if (backendId && pending) {
+        const delay = session?.tmuxSessionName ? 50 : 120;
         setTimeout(() => {
           const bytes =
             typeof pending === "string"
@@ -207,7 +211,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
             sessionId: backendId,
             data: bytes,
           }).catch(console.error);
-        }, 120);
+        }, delay);
       }
       return {
         sessions: state.sessions.map((s) =>

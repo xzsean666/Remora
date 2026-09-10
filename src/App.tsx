@@ -47,6 +47,7 @@ export default function App() {
   useEffect(() => {
     initFromPreferences();
     loadRecentProjects();
+    useFileTreeStore.getState().restoreLastWorkspace();
 
     const handleResize = () => {
       const mobile = window.innerWidth < 768;
@@ -81,20 +82,37 @@ export default function App() {
     };
     window.addEventListener("keydown", handleKeyDown);
 
-    // Auto-sync connection and auto-heal disconnected active terminal upon app focus / foreground resume
+    // Auto-sync connection and auto-heal disconnected active terminal and workspace upon app focus / foreground resume
     let lastResumeTime = 0;
-    const handleResume = () => {
+    const handleResume = async () => {
       const now = Date.now();
       if (now - lastResumeTime < 1500) return;
       lastResumeTime = now;
 
-      useConnectionStore.getState().syncConnectionStates();
+      await useConnectionStore.getState().syncConnectionStates();
 
+      // 1. Auto-heal disconnected active terminal
       const { sessions, activeSessionId, reconnectSession } = useTerminalStore.getState();
       const active = sessions.find((s) => s.id === activeSessionId);
       if (active && active.status === "disconnected") {
         console.info("[Remora] Foreground resume: auto-recovering disconnected terminal", active.id);
         reconnectSession(active.id);
+      }
+
+      // 2. Auto-heal workspace server connection and refresh directory
+      const { currentServerId, rootPath, refreshPath } = useFileTreeStore.getState();
+      const { isServerConnected, reconnect } = useConnectionStore.getState();
+      if (currentServerId && rootPath) {
+        if (!isServerConnected(currentServerId)) {
+          console.info("[Remora] Foreground resume: auto-recovering workspace server", currentServerId);
+          try {
+            await reconnect(currentServerId);
+          } catch (e) {
+            console.warn("[Remora] Failed to reconnect workspace server on resume:", e);
+          }
+        }
+        // Refresh directory tree to reflect remote state and recover any broken folder views
+        refreshPath(rootPath).catch(() => {});
       }
     };
 
@@ -242,28 +260,34 @@ export default function App() {
       {isMobile ? (
         <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden bg-vscode-bg relative">
           {/* Mobile Tab 1: Workspace (ActivityBar + Selected Sidebar View) */}
-          {mobileTab === "workspace" && (
-            <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
-              <ActivityBar />
-              <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-                {renderSidebarContent()}
-              </div>
+          <div
+            className={`flex-1 flex flex-row min-h-0 overflow-hidden ${
+              mobileTab === "workspace" ? "" : "hidden"
+            }`}
+          >
+            <ActivityBar />
+            <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+              {renderSidebarContent()}
             </div>
-          )}
+          </div>
 
           {/* Mobile Tab 2: Editor */}
-          {mobileTab === "editor" && (
-            <div className="flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col">
-              <EditorArea />
-            </div>
-          )}
+          <div
+            className={`flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col ${
+              mobileTab === "editor" ? "" : "hidden"
+            }`}
+          >
+            <EditorArea />
+          </div>
 
           {/* Mobile Tab 3: Terminal */}
-          {mobileTab === "terminal" && (
-            <div className="flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col">
-              <TerminalPanel />
-            </div>
-          )}
+          <div
+            className={`flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col ${
+              mobileTab === "terminal" ? "" : "hidden"
+            }`}
+          >
+            <TerminalPanel />
+          </div>
         </div>
       ) : (
         /* Desktop Multi-Panel Splitter Layout */

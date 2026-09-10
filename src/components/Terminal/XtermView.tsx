@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -7,6 +7,36 @@ import { RotateCcw, RefreshCw, X } from "lucide-react";
 import { safeInvoke, formatErrorMessage } from "../../utils/tauriBridge";
 import { TerminalSession, useTerminalStore } from "../../stores/terminalStore";
 import { useConnectionStore } from "../../stores/connectionStore";
+import { useLayoutStore } from "../../stores/layoutStore";
+
+/**
+ * Searches for standard tmux startup / alternate screen sequences:
+ * \x1b[?1049h (standard smcup), \x1b[?1047h, \x1b[?47h, or \x1b[H\x1b[2J (origin clear)
+ * Returns the starting byte index of the sequence, or -1 if not found.
+ */
+function findTmuxStartMarker(data: Uint8Array): number {
+  const patterns: number[][] = [
+    [0x1b, 0x5b, 0x3f, 0x31, 0x30, 0x34, 0x39, 0x68], // \x1b[?1049h
+    [0x1b, 0x5b, 0x3f, 0x31, 0x30, 0x34, 0x37, 0x68], // \x1b[?1047h
+    [0x1b, 0x5b, 0x3f, 0x34, 0x37, 0x68],             // \x1b[?47h
+    [0x1b, 0x5b, 0x48, 0x1b, 0x5b, 0x32, 0x4a],       // \x1b[H\x1b[2J
+  ];
+
+  for (const pat of patterns) {
+    if (data.length < pat.length) continue;
+    for (let i = 0; i <= data.length - pat.length; i++) {
+      let match = true;
+      for (let j = 0; j < pat.length; j++) {
+        if (data[i + j] !== pat[j]) {
+          match = false;
+          break;
+        }
+      }
+      if (match) return i;
+    }
+  }
+  return -1;
+}
 
 interface XtermViewProps {
   session: TerminalSession;
@@ -14,6 +44,7 @@ interface XtermViewProps {
 }
 
 export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
+  const { isMobile, mobileTab } = useLayoutStore();
   const containerRef = useRef<HTMLDivElement>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -21,6 +52,11 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
   const startSessionRef = useRef<(() => void) | null>(null);
   const activeChannelRef = useRef<Channel<number[] | Uint8Array> | null>(null);
   const { updateSessionStatus, updateBackendSessionId, reconnectSession, removeSession } = useTerminalStore();
+
+  const isTmuxSession = Boolean(session.tmuxSessionName);
+  const [isAttachingTmux, setIsAttachingTmux] = useState(isTmuxSession);
+  const isAttachingTmuxRef = useRef(isTmuxSession);
+  const tmuxPreambleBufferRef = useRef<Uint8Array[]>([]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -125,6 +161,8 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       textarea.addEventListener("compositionend", handleCompositionEnd);
     }
 
+    let tmuxSafetyTimeout: ReturnType<typeof setTimeout> | null = null;
+
     const startSession = async () => {
       if (isDisposed) return;
 
@@ -136,6 +174,35 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
         safeInvoke("terminal_close", { sessionId: previousId }).catch(() => {});
       }
 
+      // Ensure tmux attach command is always present if session is associated with tmux
+      const tmuxName = session.tmuxSessionName;
+      if (tmuxName && !session.pendingCommand) {
+        useTerminalStore.getState().setPendingCommand(session.id, `tmux attach -d -t "${tmuxName}"\n`);
+      }
+
+      if (isTmuxSession) {
+        isAttachingTmuxRef.current = true;
+        setIsAttachingTmux(true);
+        tmuxPreambleBufferRef.current = [];
+
+        if (tmuxSafetyTimeout) clearTimeout(tmuxSafetyTimeout);
+        tmuxSafetyTimeout = setTimeout(() => {
+          if (isAttachingTmuxRef.current) {
+            isAttachingTmuxRef.current = false;
+            setIsAttachingTmux(false);
+            if (termRef.current && tmuxPreambleBufferRef.current.length > 0) {
+              for (const chunk of tmuxPreambleBufferRef.current) {
+                termRef.current.write(chunk);
+              }
+              tmuxPreambleBufferRef.current = [];
+            }
+          }
+        }, 1200);
+      } else {
+        isAttachingTmuxRef.current = false;
+        setIsAttachingTmux(false);
+      }
+
       updateSessionStatus(session.id, "connecting");
 
       // Create a fresh Tauri Channel for EVERY session attempt so it always has an active registered callback
@@ -144,6 +211,28 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       channel.onmessage = (message) => {
         if (isDisposed || activeChannelRef.current !== channel) return;
         const data = message instanceof Uint8Array ? message : new Uint8Array(message);
+
+        if (isAttachingTmuxRef.current) {
+          const markerIdx = findTmuxStartMarker(data);
+          if (markerIdx !== -1) {
+            // TMUX session established! Discard shell prompt / echo preamble, write clean tmux frame
+            isAttachingTmuxRef.current = false;
+            setIsAttachingTmux(false);
+            if (tmuxSafetyTimeout) {
+              clearTimeout(tmuxSafetyTimeout);
+              tmuxSafetyTimeout = null;
+            }
+            tmuxPreambleBufferRef.current = [];
+            const cleanTmuxData = data.subarray(markerIdx);
+            term.write(cleanTmuxData);
+            return;
+          } else {
+            // Buffer preamble (motd, prompt, command echo) in case of timeout fallback
+            tmuxPreambleBufferRef.current.push(data);
+            return;
+          }
+        }
+
         term.write(data);
       };
 
@@ -202,6 +291,12 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
             clearTimeout(connectTimeout);
             connectTimeout = null;
           }
+          if (tmuxSafetyTimeout) {
+            clearTimeout(tmuxSafetyTimeout);
+            tmuxSafetyTimeout = null;
+          }
+          isAttachingTmuxRef.current = false;
+          setIsAttachingTmux(false);
           console.error("Failed to open terminal session:", err);
           updateSessionStatus(session.id, "disconnected");
           updateBackendSessionId(session.id, null);
@@ -288,6 +383,7 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       if (resizeTimer) clearTimeout(resizeTimer);
       if (textareaClearTimer) clearTimeout(textareaClearTimer);
       if (connectTimeout) clearTimeout(connectTimeout);
+      if (tmuxSafetyTimeout) clearTimeout(tmuxSafetyTimeout);
       if (textarea) {
         textarea.removeEventListener("compositionstart", handleCompositionStart);
         textarea.removeEventListener("compositionupdate", handleCompositionUpdate);
@@ -314,9 +410,10 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
     }
   }, [session.reconnectCount]);
 
-  // Fit and focus when switching to active tab
+  // Fit and focus when switching to active tab or switching back to mobile terminal
   useEffect(() => {
-    if (isActive && fitAddonRef.current && termRef.current) {
+    const isVisible = isActive && (!isMobile || mobileTab === "terminal");
+    if (isVisible && fitAddonRef.current && termRef.current) {
       const timer = setTimeout(() => {
         try {
           fitAddonRef.current?.fit();
@@ -327,13 +424,29 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       }, 50);
       return () => clearTimeout(timer);
     }
-  }, [isActive]);
+  }, [isActive, isMobile, mobileTab]);
 
   return (
     <div
       style={{ display: isActive ? "block" : "none" }}
       className="w-full h-full relative overflow-hidden"
     >
+      {/* Stealth TMUX Attaching Overlay */}
+      {isAttachingTmux && session.status !== "disconnected" && (
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#181818] select-none animate-in fade-in duration-100">
+          <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-vscode-sidebar/95 border border-vscode-border shadow-2xl backdrop-blur-md">
+            <RefreshCw className="w-4 h-4 text-vscode-activityBarActive animate-spin" />
+            <span className="text-xs font-medium text-vscode-textBright">
+              正在接入 TMUX 会话{" "}
+              <span className="text-amber-400 font-mono font-semibold">
+                {session.tmuxSessionName || ""}
+              </span>
+              ...
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Disconnected floating recovery badge */}
       {session.status === "disconnected" && (
         <div className="absolute top-2 right-4 z-20 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[#241212]/95 border border-red-500/50 text-red-200 text-xs shadow-xl backdrop-blur-md select-none animate-in fade-in duration-150">
@@ -357,8 +470,8 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
         </div>
       )}
 
-      {/* Connecting floating badge */}
-      {session.status === "connecting" && (
+      {/* Connecting floating badge (shown only when not in stealth overlay) */}
+      {session.status === "connecting" && !isAttachingTmux && (
         <div className="absolute top-2 right-4 z-20 flex items-center gap-2 px-2.5 py-1 rounded-lg bg-[#13202e]/90 border border-sky-500/40 text-sky-200 text-xs shadow-md backdrop-blur-xs select-none">
           <RefreshCw className="w-3 h-3 text-sky-400 animate-spin" />
           <span className="font-mono text-[11px]">

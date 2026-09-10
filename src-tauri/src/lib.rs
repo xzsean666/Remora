@@ -170,6 +170,8 @@ async fn do_connect_server(
     state: &AppState,
     app: Option<&tauri::AppHandle>,
 ) -> Result<()> {
+    state.sftp.close_session(server_id).await;
+
     let mut server = state
         .storage
         .get_server(server_id)?
@@ -205,6 +207,23 @@ async fn do_connect_server(
     res
 }
 
+async fn ensure_server_connected(
+    server_id: &str,
+    state: &AppState,
+    app: Option<&tauri::AppHandle>,
+) -> Result<()> {
+    let current_state = state.connection.get_state(server_id).await;
+    if current_state != ConnectionState::Connected {
+        tracing::info!(
+            "Server {} is not connected (state: {:?}), attempting auto-reconnect before SFTP operation",
+            server_id,
+            current_state
+        );
+        do_connect_server(server_id, state, app).await?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn connect_server(
     server_id: String,
@@ -238,6 +257,7 @@ async fn reconnect_server(
     state: State<'_, Arc<AppState>>,
     app: tauri::AppHandle,
 ) -> Result<()> {
+    state.sftp.close_session(&server_id).await;
     state.connection.reconnect(&server_id, Some(app)).await
 }
 
@@ -263,8 +283,24 @@ async fn sftp_read_dir(
     server_id: String,
     path: String,
     state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
 ) -> Result<Vec<FileEntry>> {
-    state.sftp.read_dir(&server_id, &path).await
+    let _ = ensure_server_connected(&server_id, &state, Some(&app)).await;
+
+    match state.sftp.read_dir(&server_id, &path).await {
+        Ok(entries) => Ok(entries),
+        Err(e) => {
+            tracing::warn!(
+                "sftp_read_dir initial attempt failed for {} at {}: {}. Attempting auto-reconnect...",
+                server_id,
+                path,
+                e
+            );
+            state.sftp.close_session(&server_id).await;
+            do_connect_server(&server_id, &state, Some(&app)).await?;
+            state.sftp.read_dir(&server_id, &path).await
+        }
+    }
 }
 
 #[tauri::command]
@@ -272,8 +308,24 @@ async fn sftp_read_file(
     server_id: String,
     path: String,
     state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
 ) -> Result<ReadFileResult> {
-    state.sftp.read_file(&server_id, &path).await
+    let _ = ensure_server_connected(&server_id, &state, Some(&app)).await;
+
+    match state.sftp.read_file(&server_id, &path).await {
+        Ok(res) => Ok(res),
+        Err(e) => {
+            tracing::warn!(
+                "sftp_read_file initial attempt failed for {} at {}: {}. Attempting auto-reconnect...",
+                server_id,
+                path,
+                e
+            );
+            state.sftp.close_session(&server_id).await;
+            do_connect_server(&server_id, &state, Some(&app)).await?;
+            state.sftp.read_file(&server_id, &path).await
+        }
+    }
 }
 
 #[tauri::command]
@@ -283,11 +335,36 @@ async fn sftp_write_file(
     content: String,
     expected_mtime: Option<u64>,
     state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
 ) -> Result<WriteFileResult> {
-    state
+    let _ = ensure_server_connected(&server_id, &state, Some(&app)).await;
+
+    match state
         .sftp
         .write_file(&server_id, &path, &content, expected_mtime)
         .await
+    {
+        Ok(res) => Ok(res),
+        Err(e) => {
+            if let AppError::Sftp(ref msg) = e {
+                if msg.contains("Conflict detected") {
+                    return Err(e);
+                }
+            }
+            tracing::warn!(
+                "sftp_write_file initial attempt failed for {} at {}: {}. Attempting auto-reconnect...",
+                server_id,
+                path,
+                e
+            );
+            state.sftp.close_session(&server_id).await;
+            do_connect_server(&server_id, &state, Some(&app)).await?;
+            state
+                .sftp
+                .write_file(&server_id, &path, &content, expected_mtime)
+                .await
+        }
+    }
 }
 
 #[tauri::command]
@@ -295,8 +372,23 @@ async fn sftp_create_file(
     server_id: String,
     path: String,
     state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
 ) -> Result<()> {
-    state.sftp.create_file(&server_id, &path).await
+    let _ = ensure_server_connected(&server_id, &state, Some(&app)).await;
+    match state.sftp.create_file(&server_id, &path).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            tracing::warn!(
+                "sftp_create_file failed for {} at {}: {}. Attempting auto-reconnect...",
+                server_id,
+                path,
+                e
+            );
+            state.sftp.close_session(&server_id).await;
+            do_connect_server(&server_id, &state, Some(&app)).await?;
+            state.sftp.create_file(&server_id, &path).await
+        }
+    }
 }
 
 #[tauri::command]
@@ -304,8 +396,23 @@ async fn sftp_create_dir(
     server_id: String,
     path: String,
     state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
 ) -> Result<()> {
-    state.sftp.create_dir(&server_id, &path).await
+    let _ = ensure_server_connected(&server_id, &state, Some(&app)).await;
+    match state.sftp.create_dir(&server_id, &path).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            tracing::warn!(
+                "sftp_create_dir failed for {} at {}: {}. Attempting auto-reconnect...",
+                server_id,
+                path,
+                e
+            );
+            state.sftp.close_session(&server_id).await;
+            do_connect_server(&server_id, &state, Some(&app)).await?;
+            state.sftp.create_dir(&server_id, &path).await
+        }
+    }
 }
 
 #[tauri::command]
@@ -314,8 +421,22 @@ async fn sftp_rename(
     old_path: String,
     new_path: String,
     state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
 ) -> Result<()> {
-    state.sftp.rename(&server_id, &old_path, &new_path).await
+    let _ = ensure_server_connected(&server_id, &state, Some(&app)).await;
+    match state.sftp.rename(&server_id, &old_path, &new_path).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            tracing::warn!(
+                "sftp_rename failed for {}: {}. Attempting auto-reconnect...",
+                server_id,
+                e
+            );
+            state.sftp.close_session(&server_id).await;
+            do_connect_server(&server_id, &state, Some(&app)).await?;
+            state.sftp.rename(&server_id, &old_path, &new_path).await
+        }
+    }
 }
 
 #[tauri::command]
@@ -324,8 +445,22 @@ async fn sftp_remove(
     path: String,
     is_dir: bool,
     state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
 ) -> Result<()> {
-    state.sftp.remove(&server_id, &path, is_dir).await
+    let _ = ensure_server_connected(&server_id, &state, Some(&app)).await;
+    match state.sftp.remove(&server_id, &path, is_dir).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            tracing::warn!(
+                "sftp_remove failed for {}: {}. Attempting auto-reconnect...",
+                server_id,
+                e
+            );
+            state.sftp.close_session(&server_id).await;
+            do_connect_server(&server_id, &state, Some(&app)).await?;
+            state.sftp.remove(&server_id, &path, is_dir).await
+        }
+    }
 }
 
 #[tauri::command]
@@ -333,8 +468,22 @@ async fn sftp_trash(
     server_id: String,
     path: String,
     state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
 ) -> Result<String> {
-    state.sftp.trash(&server_id, &path).await
+    let _ = ensure_server_connected(&server_id, &state, Some(&app)).await;
+    match state.sftp.trash(&server_id, &path).await {
+        Ok(dest) => Ok(dest),
+        Err(e) => {
+            tracing::warn!(
+                "sftp_trash failed for {}: {}. Attempting auto-reconnect...",
+                server_id,
+                e
+            );
+            state.sftp.close_session(&server_id).await;
+            do_connect_server(&server_id, &state, Some(&app)).await?;
+            state.sftp.trash(&server_id, &path).await
+        }
+    }
 }
 
 #[tauri::command]
@@ -342,8 +491,24 @@ async fn sftp_stat(
     server_id: String,
     path: String,
     state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
 ) -> Result<FileEntry> {
-    state.sftp.stat(&server_id, &path).await
+    let _ = ensure_server_connected(&server_id, &state, Some(&app)).await;
+
+    match state.sftp.stat(&server_id, &path).await {
+        Ok(entry) => Ok(entry),
+        Err(e) => {
+            tracing::warn!(
+                "sftp_stat initial attempt failed for {} at {}: {}. Attempting auto-reconnect...",
+                server_id,
+                path,
+                e
+            );
+            state.sftp.close_session(&server_id).await;
+            do_connect_server(&server_id, &state, Some(&app)).await?;
+            state.sftp.stat(&server_id, &path).await
+        }
+    }
 }
 
 // --- Terminal Commands ---

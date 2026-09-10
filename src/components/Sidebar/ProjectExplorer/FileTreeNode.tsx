@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, AlertCircle, RotateCw } from "lucide-react";
 import { FileEntry, useFileTreeStore } from "../../../stores/fileTreeStore";
 import { useTransferStore } from "../../../stores/transferStore";
 import { getFileIcon } from "../../../utils/fileIcons";
@@ -24,6 +24,7 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
     expandedPaths,
     selectedPath,
     loadingPaths,
+    dirErrors,
     dragOverPath,
     setDragOverPath,
     toggleExpand,
@@ -42,6 +43,7 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
   const isLoading = loadingPaths.includes(entry.path);
   const isDragOver = entry.is_dir && dragOverPath === entry.path;
   const children = tree[entry.path] || [];
+  const nodeError = entry.is_dir ? dirErrors[entry.path] : null;
 
   const parentPath = entry.path.substring(0, entry.path.lastIndexOf("/")) || "/";
 
@@ -229,7 +231,31 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
             />
           ))}
 
-          {children.length === 0 && !isLoading && !creatingType && (
+          {nodeError && !isLoading && (
+            <div
+              style={{ paddingLeft: `${(level + 1) * 14 + 8}px` }}
+              className="py-1 pr-2 flex items-center justify-between gap-1 text-[11px] text-rose-400 bg-rose-500/10 rounded my-0.5"
+            >
+              <div className="flex items-center gap-1 min-w-0 flex-1 truncate" title={nodeError}>
+                <AlertCircle className="w-3 h-3 flex-shrink-0 text-rose-400" />
+                <span className="truncate">{nodeError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  refreshPath(entry.path);
+                }}
+                className="px-1.5 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-[10px] flex items-center gap-1 flex-shrink-0 transition-colors cursor-pointer"
+                title="Retry loading directory / 重试加载目录"
+              >
+                <RotateCw className="w-2.5 h-2.5" />
+                <span>Retry</span>
+              </button>
+            </div>
+          )}
+
+          {children.length === 0 && !isLoading && !creatingType && !nodeError && (
             <div
               style={{ paddingLeft: `${(level + 1) * 14 + 10}px` }}
               className="py-1 text-[11px] text-vscode-textMuted/60 italic"

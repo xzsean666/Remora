@@ -55,6 +55,20 @@ impl SftpService {
     }
 
     pub async fn read_dir(&self, server_id: &str, path: &str) -> Result<Vec<FileEntry>> {
+        match self.do_read_dir(server_id, path).await {
+            Ok(entries) => Ok(entries),
+            Err(e) => {
+                warn!(
+                    "SFTP read_dir failed on server {} for path {}: {:?}. Invalidating cached session and retrying...",
+                    server_id, path, e
+                );
+                self.close_session(server_id).await;
+                self.do_read_dir(server_id, path).await
+            }
+        }
+    }
+
+    async fn do_read_dir(&self, server_id: &str, path: &str) -> Result<Vec<FileEntry>> {
         let session_arc = self.get_or_create_session(server_id).await?;
         let sftp = session_arc.lock().await;
 
@@ -72,11 +86,27 @@ impl SftpService {
                 sort_file_entries(&mut entries);
                 Ok(entries)
             }
-            Err(e) => Err(AppError::Sftp(format!("Failed to read directory {}: {}", path, e))),
+            Err(e) => {
+                Err(AppError::Sftp(format!("Failed to read directory {}: {}", path, e)))
+            }
         }
     }
 
     pub async fn read_file(&self, server_id: &str, path: &str) -> Result<ReadFileResult> {
+        match self.do_read_file(server_id, path).await {
+            Ok(res) => Ok(res),
+            Err(e) => {
+                warn!(
+                    "SFTP read_file failed on server {} for path {}: {:?}. Invalidating cached session and retrying...",
+                    server_id, path, e
+                );
+                self.close_session(server_id).await;
+                self.do_read_file(server_id, path).await
+            }
+        }
+    }
+
+    async fn do_read_file(&self, server_id: &str, path: &str) -> Result<ReadFileResult> {
         let session_arc = self.get_or_create_session(server_id).await?;
         let sftp = session_arc.lock().await;
 
@@ -106,6 +136,20 @@ impl SftpService {
     }
 
     pub async fn write_file(
+        &self,
+        server_id: &str,
+        path: &str,
+        content: &str,
+        expected_mtime: Option<u64>,
+    ) -> Result<WriteFileResult> {
+        let res = self.do_write_file(server_id, path, content, expected_mtime).await;
+        if res.is_err() {
+            self.close_session(server_id).await;
+        }
+        res
+    }
+
+    async fn do_write_file(
         &self,
         server_id: &str,
         path: &str,
@@ -158,53 +202,85 @@ impl SftpService {
     }
 
     pub async fn create_file(&self, server_id: &str, path: &str) -> Result<()> {
-        let session_arc = self.get_or_create_session(server_id).await?;
-        let sftp = session_arc.lock().await;
+        let res = async {
+            let session_arc = self.get_or_create_session(server_id).await?;
+            let sftp = session_arc.lock().await;
 
-        let mut file = sftp
-            .open_with_flags(path, OpenFlags::WRITE | OpenFlags::CREATE)
-            .await
-            .map_err(|e| AppError::Sftp(format!("Failed to create file {}: {}", path, e)))?;
+            let mut file = sftp
+                .open_with_flags(path, OpenFlags::WRITE | OpenFlags::CREATE)
+                .await
+                .map_err(|e| AppError::Sftp(format!("Failed to create file {}: {}", path, e)))?;
 
-        file.flush()
-            .await
-            .map_err(|e| AppError::Sftp(format!("Failed to flush new file {}: {}", path, e)))?;
+            file.flush()
+                .await
+                .map_err(|e| AppError::Sftp(format!("Failed to flush new file {}: {}", path, e)))?;
 
-        Ok(())
+            Ok(())
+        }
+        .await;
+
+        if res.is_err() {
+            self.close_session(server_id).await;
+        }
+        res
     }
 
     pub async fn create_dir(&self, server_id: &str, path: &str) -> Result<()> {
-        let session_arc = self.get_or_create_session(server_id).await?;
-        let sftp = session_arc.lock().await;
+        let res = async {
+            let session_arc = self.get_or_create_session(server_id).await?;
+            let sftp = session_arc.lock().await;
 
-        sftp.create_dir(path)
-            .await
-            .map_err(|e| AppError::Sftp(format!("Failed to create directory {}: {}", path, e)))?;
-        Ok(())
+            sftp.create_dir(path)
+                .await
+                .map_err(|e| AppError::Sftp(format!("Failed to create directory {}: {}", path, e)))?;
+            Ok(())
+        }
+        .await;
+
+        if res.is_err() {
+            self.close_session(server_id).await;
+        }
+        res
     }
 
     pub async fn rename(&self, server_id: &str, old_path: &str, new_path: &str) -> Result<()> {
-        let session_arc = self.get_or_create_session(server_id).await?;
-        let sftp = session_arc.lock().await;
+        let res = async {
+            let session_arc = self.get_or_create_session(server_id).await?;
+            let sftp = session_arc.lock().await;
 
-        sftp.rename(old_path, new_path)
-            .await
-            .map_err(|e| AppError::Sftp(format!("Failed to rename {} to {}: {}", old_path, new_path, e)))?;
-        Ok(())
+            sftp.rename(old_path, new_path)
+                .await
+                .map_err(|e| AppError::Sftp(format!("Failed to rename {} to {}: {}", old_path, new_path, e)))?;
+            Ok(())
+        }
+        .await;
+
+        if res.is_err() {
+            self.close_session(server_id).await;
+        }
+        res
     }
 
     pub async fn remove(&self, server_id: &str, path: &str, is_dir: bool) -> Result<()> {
-        let session_arc = self.get_or_create_session(server_id).await?;
-        let sftp = session_arc.lock().await;
+        let res = async {
+            let session_arc = self.get_or_create_session(server_id).await?;
+            let sftp = session_arc.lock().await;
 
-        if is_dir {
-            Self::remove_remote_dir_recursive(&sftp, path).await?;
-        } else {
-            sftp.remove_file(path)
-                .await
-                .map_err(|e| AppError::Sftp(format!("Failed to remove file {}: {}", path, e)))?;
+            if is_dir {
+                Self::remove_remote_dir_recursive(&sftp, path).await?;
+            } else {
+                sftp.remove_file(path)
+                    .await
+                    .map_err(|e| AppError::Sftp(format!("Failed to remove file {}: {}", path, e)))?;
+            }
+            Ok(())
         }
-        Ok(())
+        .await;
+
+        if res.is_err() {
+            self.close_session(server_id).await;
+        }
+        res
     }
 
     async fn remove_remote_dir_recursive(sftp: &SftpSession, path: &str) -> Result<()> {
@@ -243,6 +319,14 @@ impl SftpService {
     }
 
     pub async fn trash(&self, server_id: &str, path: &str) -> Result<String> {
+        let res = self.do_trash(server_id, path).await;
+        if res.is_err() {
+            self.close_session(server_id).await;
+        }
+        res
+    }
+
+    async fn do_trash(&self, server_id: &str, path: &str) -> Result<String> {
         let session_arc = self.get_or_create_session(server_id).await?;
         let sftp = session_arc.lock().await;
 
@@ -322,6 +406,20 @@ impl SftpService {
     }
 
     pub async fn stat(&self, server_id: &str, path: &str) -> Result<FileEntry> {
+        match self.do_stat(server_id, path).await {
+            Ok(entry) => Ok(entry),
+            Err(e) => {
+                warn!(
+                    "SFTP stat failed on server {} for path {}: {:?}. Invalidating cached session and retrying...",
+                    server_id, path, e
+                );
+                self.close_session(server_id).await;
+                self.do_stat(server_id, path).await
+            }
+        }
+    }
+
+    async fn do_stat(&self, server_id: &str, path: &str) -> Result<FileEntry> {
         let session_arc = self.get_or_create_session(server_id).await?;
         let sftp = session_arc.lock().await;
 

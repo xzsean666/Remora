@@ -854,6 +854,10 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
     }
   };
 
+  const targetServerId = currentServerId || activeServerId;
+  const isTargetServerConn = targetServerId ? isServerConnected(targetServerId) : false;
+  const targetServerStatus = targetServerId ? serverStates[targetServerId] || "disconnected" : "disconnected";
+
   return (
     <div className="flex flex-col h-full overflow-hidden select-none">
       {/* Explorer Section Title & Actions Header */}
@@ -861,12 +865,24 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
         <div
           onContextMenu={handleRootContextMenu}
           className="flex items-center gap-1.5 truncate min-w-0 flex-1 cursor-pointer hover:underline mr-1"
-          title={`Server: ${activeMeta?.name || activeServerId}\nPath: ${rootPath}`}
+          title={`Server: ${activeMeta?.name || activeServerId}\nPath: ${rootPath}\nStatus: ${targetServerStatus}`}
         >
           <span className="text-[10px] text-vscode-activityBarActive font-mono px-1 py-0.2 rounded bg-vscode-activityBarActive/10 border border-vscode-activityBarActive/20 flex-shrink-0">
             {activeMeta?.name || "SSH"}
           </span>
           <span className="truncate uppercase font-bold text-vscode-textBright">{rootName}</span>
+          {targetServerId && (
+            <span
+              className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                isTargetServerConn
+                  ? "bg-emerald-400"
+                  : targetServerStatus === "connecting"
+                  ? "bg-amber-400 animate-ping"
+                  : "bg-rose-400"
+              }`}
+              title={`Server status: ${targetServerStatus}`}
+            />
+          )}
         </div>
 
         {/* Action icons */}
@@ -932,6 +948,34 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
             : ""
         }`}
       >
+        {/* Offline Warning Banner with One-Click Reconnect */}
+        {targetServerId && !isTargetServerConn && (
+          <div className="mx-2 my-1.5 p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+              <AlertCircle className="w-3.5 h-3.5 text-rose-400 flex-shrink-0" />
+              <span className="truncate text-[11px]">
+                {targetServerStatus === "connecting"
+                  ? "Reconnecting to SSH server..."
+                  : "SSH disconnected (已断开)"}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                await handleConnectServer(targetServerId);
+                if (rootPath) {
+                  await refreshPath(rootPath);
+                }
+              }}
+              disabled={targetServerStatus === "connecting"}
+              className="px-2 py-0.5 rounded bg-rose-500/25 hover:bg-rose-500/40 text-white font-medium text-[10px] flex items-center gap-1 flex-shrink-0 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-2.5 h-2.5 ${targetServerStatus === "connecting" ? "animate-spin" : ""}`} />
+              <span>{targetServerStatus === "connecting" ? "Connecting..." : "Reconnect"}</span>
+            </button>
+          </div>
+        )}
+
         {/* Creating new item in root */}
         {creatingType && (
           <div className="h-6 flex items-center px-3 min-w-0">

@@ -4,84 +4,66 @@
 
 ---
 
-## 1. 当前目标与任务
-- **当前 Goal**: 优化 GitHub Actions Release 流水线自动引用项目版本
+## 当前目标与任务
+- **当前 Goal**: 合并上游最新版本并推进版本号至 0.1.10，无缝集成工作区闲置断连自愈与移动端 Tab 终端保活/TMUX静默接入
 - **当前 Task**: 
-  - TASK-039: 优化 GitHub Actions Release 流水线自动引用项目版本 (Optimize Release Workflow to Auto-Reference Project Version) [DONE]
+  - TASK-040: 根治工作区长时间闲置后断连无法查看文件夹内容、SFTP僵尸会话死锁自愈与前台恢复自动重连 [DONE]
+  - TASK-041: 移动端Tab切换终端保活、TMUX会话防退化与无感静默接入 [DONE]
 - **当前状态**: DONE
 
 ---
 
 ## 2. 本次会话完成内容
-1. **优化 GitHub Actions Release 流水线自动引用项目版本 (TASK-039)**:
-   - **完全移除 `workflow_dispatch` 手动输入表单**: 移除 `inputs.version` 参数，在 GitHub 网页端点击 `Run workflow` 时无需输入任何版本号，一键零配置直接运行。
-   - **多层级安全版本提取机制**: 在 `Determine Version and Tag` 步骤中，优先调用 runner 自带的 `jq` 从 `package.json` 读取当前工程既有版本号，若无则回退至 `node`，若仍无则使用 `grep` 提取 `src-tauri/tauri.conf.json`，自动生成格式规范的 Release 标签（如 `v0.1.9`），保证桌面端与 Android 移动端归档版本绝对一致。
-   - **全兼容 Git Tag 推送**: 依然完整保留对 `push: tags: - 'v*'` 的触发支持。
+1. **合并上游最新版本与流水线成果 (v0.1.8 / v0.1.9 对齐)**:
+   - **自动化流水线版本自解析 (TASK-039)**: 移除 `workflow_dispatch` 手动输入 tag 版本的表单，实现 GitHub Actions 零参数触发直接从项目读取版本。
+   - **全局报错美化与 Android 图标对齐 (TASK-038)**: 彻底消除 `[object Object]` 错误提示，引入 `formatErrorMessage`；补齐 Android 原生自适应图标与 `#181820` 暗色背景。
+   - **CI 跨平台构建容灾 (TASK-037)**: 完善 `libfuse2` 依赖与缺少私钥时的 `--no-sign` 自动降级机制。
 
-2. **彻底根除全局报错 [object Object] (TASK-038)**:
-   - **Rust 后端自定义序列化**: 为核心 `AppError` 实施自定义 `Serialize`，利用 `thiserror` 格式化直接将错误枚举序列化为带类型前缀的人类可读字符串（如 `"SSH connection error: Connection refused (os error 111)"`），彻底解决 Serde 默认将带参 enum variant 序列化为单键 JSON 对象导致的直接转字符串变 `[object Object]` 缺陷。
-   - **后端单元测试覆盖**: 在 `src-tauri/src/core/error.rs` 中增加 `test_app_error_serialization_as_string`，验证各类 `AppError` 序列化输出为纯字符串。
-   - **前端通用解析器 `formatErrorMessage`**: 在 `src/utils/tauriBridge.ts` 中实现并导出高韧性格式化函数，针对字符串、标准 Error 实例、Rust Serde 单键 enum、普通错误对象（`message`/`error`/`details`）、任意未知对象（JSON 序列化降级）及无原型对象（`Object.create(null)`）进行防御性解析，永不输出 `[object Object]`。
-   - **`safeInvoke` 全面托管**: 在 `safeInvoke` 中统一拦截异常并重抛携带格式化文本与自定义 `toString()` 的 Error 对象，使 `String(err)` 或 `${err}` 也无法打印出 `[object Object]`。
-   - **前端全量调用点替换**: 更新 `ProjectExplorer`、`OpenFolderModal`、`ServerManager`、`KeyManagerModal`、`GroupModal`、`ImportSnippetModal`、`SnippetEditModal`、`TmuxManagerModal`、`XtermView`、`App`、`connectionStore`、`editorStore`、`fileTreeStore`，将所有 `String(err)`、`${err}` 与 `(err?.message || err)` 统一替换为 `formatErrorMessage(err)`。
+2. **工作区闲置断连 SFTP 僵尸死锁自愈与自动重连 (TASK-040)**:
+   - **Rust 后端 SFTP 僵尸通道感知与剔除**: 当远端由于超时断开连接时，`SftpService` 在检测到 Broken pipe / Channel closed 错误时立即销毁并从缓存移除死会话，并在活跃连接下自动重建通道与重试。
+   - **底层断网级透明自愈**: 在 `lib.rs` 的 `sftp_read_dir` 中接入自动建联重试机制，底层 SSH 断开时透明触发 `do_connect_server` 并在重连后继续执行读取。
+   - **前端假空目录展示根除与一键重试**: `FileTreeNode` 读取 `dirErrors`，针对网络错误展示红色警告与重试按钮，杜绝误报为 "Empty folder"。
+   - **工作区在线状态与前台唤醒自动刷新**: 在项目标题栏增加入口在线指示点与快捷重连入口；`App.tsx` 监听恢复前台并自动探测工作区连通性与触发目录刷新。
 
-2. **Android 移动端应用图标全量替换与桌面端对齐 (TASK-038)**:
-   - **清理模板旧资产**: 彻底删除 `src-tauri/gen/android/app/src/main/res/` 中遗留的 Android Studio 绿色机器人矢量资源（`drawable/ic_launcher_background.xml` 与 `drawable-v24/ic_launcher_foreground.xml`）。
-   - **同步全套高清图标**: 将 Remora 官方暗色终端图标同步写入 `res/` 的全部 DPI 目录（`mipmap-mdpi`, `mipmap-hdpi`, `mipmap-xhdpi`, `mipmap-xxhdpi`, `mipmap-xxxhdpi`），包括标准图标与圆形图标。
-   - **自适应图标与暗黑对齐**: 在 `mipmap-anydpi-v26/` 中配置 `ic_launcher.xml` 与 `ic_launcher_round.xml` 自适应图标，将背景颜色 `ic_launcher_background` 统一设为 Remora 官方暗黑底色 `#181820`。
-   - **清单文件完备性**: 在 `AndroidManifest.xml` 中补充 `android:roundIcon="@mipmap/ic_launcher_round"`，确保主流 Android 启动器（圆形/水滴/圆角）均展示 Remora 官方图标。
-   - **构建链路自动化**: 在 `build.sh` 中增加 Android 打包前自动同步图标逻辑，防止原生项目重构后图标回退。
+3. **移动端三板块 Keep-Alive 存活机制与 TMUX 全静默接入 (TASK-041)**:
+   - **DOM 级保活机制**: 移动端工作区、编辑器、终端改由 CSS `hidden` 控制显示隐藏，切换 Tab 时彻底保留 PTY 进程、xterm.js 实例与 TMUX 现场，杜绝组件卸载杀进程。
+   - **TMUX 会话一等公民与防退化闭环**: 在 `terminalStore` 与 `XtermView` 中注入保底机制，关联 TMUX 的终端绝不因重挂载退化为普通 shell。
+   - **静默无感接入 (Stealth Attach)**: 在 `XtermView` 中实现流式过滤器拦截进入 TMUX 前的 prompt 与 `tmux attach` 命令输入回显，捕获 alternate screen 控制序列后直接渲染 TMUX 第一帧界面，并辅以优雅暗黑加载遮罩与 1000ms 超时兜底。
+
+4. **版本号统一推进至 0.1.10**:
+   - `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 统一更新为 `0.1.10`。
+   - 解决所有合并冲突，确保全平台配置与文档严格对齐。
 
 ---
 
 ## 3. 修改与创建的文件
 - **新建文件**:
-  - `docs/AI/tasks/TASK-039.md`
-  - `docs/AI/tasks/TASK-038.md`
-  - `src-tauri/icons/android/mipmap-anydpi-v26/ic_launcher_round.xml`
-  - `src-tauri/gen/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml`
-  - `src-tauri/gen/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml`
-  - `src-tauri/gen/android/app/src/main/res/values/ic_launcher_background.xml`
+  - `docs/AI/tasks/TASK-040.md`
+  - `docs/AI/tasks/TASK-041.md`
 - **修改文件**:
-  - `.github/workflows/release.yml`
-  - `src-tauri/src/core/error.rs`
-  - `src/utils/tauriBridge.ts`
-  - `src/stores/connectionStore.ts`
-  - `src/stores/editorStore.ts`
-  - `src/stores/fileTreeStore.ts`
-  - `src/components/Sidebar/ProjectExplorer/OpenFolderModal.tsx`
-  - `src/components/Sidebar/ProjectExplorer/ProjectExplorer.tsx`
-  - `src/components/Sidebar/ServerManager/ServerManager.tsx`
-  - `src/components/Sidebar/ServerManager/KeyManagerModal.tsx`
-  - `src/components/Sidebar/QuickInput/GroupModal.tsx`
-  - `src/components/Sidebar/QuickInput/ImportSnippetModal.tsx`
-  - `src/components/Sidebar/QuickInput/SnippetEditModal.tsx`
-  - `src/components/Terminal/TmuxManagerModal.tsx`
-  - `src/components/Terminal/XtermView.tsx`
+  - `package.json`
+  - `src-tauri/Cargo.toml`
+  - `src-tauri/tauri.conf.json`
+  - `src-tauri/src/lib.rs`
+  - `src-tauri/src/sftp/service.rs`
   - `src/App.tsx`
-  - `src-tauri/icons/android/values/ic_launcher_background.xml`
-  - `src-tauri/gen/android/app/src/main/AndroidManifest.xml`
-  - `src-tauri/gen/android/app/src/main/res/mipmap-*/...` (替换所有 DPI 像素图)
-  - `build.sh`
+  - `src/components/Sidebar/ProjectExplorer/FileTreeNode.tsx`
+  - `src/components/Sidebar/ProjectExplorer/ProjectExplorer.tsx`
+  - `src/components/Terminal/XtermView.tsx`
+  - `src/stores/fileTreeStore.ts`
+  - `src/stores/terminalStore.ts`
   - `docs/AI/TASK_INDEX.md`
   - `docs/AI/SESSION_STATE.md`
-- **删除文件**:
-  - `src-tauri/gen/android/app/src/main/res/drawable/ic_launcher_background.xml`
-  - `src-tauri/gen/android/app/src/main/res/drawable-v24/ic_launcher_foreground.xml`
 
 ---
 
 ## 4. 已运行的验证命令及结果
-- `bash Determine Version and Tag script`: 本地模拟 Action 的 Tag 探测脚本，成功直接从工程提取 `v0.1.9`，无任何外部输入依赖。
-- `python3 PyYAML syntax validation`: 验证 `.github/workflows/release.yml` 语法 100% 正确。
-- `pnpm build`: 成功，TypeScript 静态类型检查 0 错误，打包耗时 10.09s。
-- `cargo check --manifest-path src-tauri/Cargo.toml`: 成功，Rust 检查通过。
-- `cargo test --manifest-path src-tauri/Cargo.toml`: 26 项单元测试（含新增 `test_app_error_serialization_as_string`）+ 1 项 e2e 测试全数通过。
-- `node -e '...'`: 针对 `formatErrorMessage` 覆盖 null/undefined/string/Error/Rust enum/JSON/null prototype 等 11 种复杂测试用例，100% 通过。
-- 图像视觉比对: 确认 `gen/android/app/src/main/res/mipmap-*` 图标与桌面端 `src-tauri/icons/icon.png` 100% 一致。
+- `cargo test --manifest-path src-tauri/Cargo.toml`: 26 项单元测试 + 1 项 e2e 测试 100% 全部通过。
+- `pnpm tsc --noEmit`: 前端 TypeScript 静态类型检查 0 报错。
+- `pnpm build`: Vite 生产打包 100% 成功，所有静态资源优化完毕。
+- `git push --dry-run origin main --tags`: 通过 `xzsean666` 鉴权测试成功，Tag `v0.1.10` 与 `main` 分支就绪。
 
 ---
 
 ## 5. 未解决问题与剩余风险
-- 无。两个问题已彻底解决并闭环。
-
+- 无。

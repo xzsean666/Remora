@@ -52,6 +52,7 @@ interface FileTreeState {
   renameItem: (oldPath: string, newName: string) => Promise<void>;
   deleteItem: (path: string, isDir: boolean, permanent?: boolean) => Promise<void>;
   refreshPath: (path: string) => Promise<void>;
+  restoreLastWorkspace: () => Promise<void>;
 }
 
 export const useFileTreeStore = create<FileTreeState>((set, get) => ({
@@ -66,6 +67,20 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   dirErrors: {},
   dragOverPath: null,
   deleteTarget: null,
+
+  restoreLastWorkspace: async () => {
+    try {
+      const lastServer = localStorage.getItem("remora_last_workspace_server");
+      const lastPath = localStorage.getItem("remora_last_workspace_path");
+      const lastName = localStorage.getItem("remora_last_workspace_name");
+      if (lastServer && lastPath && !get().rootPath) {
+        console.info("[Remora] Auto-restoring last active workspace:", lastServer, lastPath);
+        await get().setRoot(lastServer, lastPath, lastName || undefined);
+      }
+    } catch (e) {
+      console.warn("Failed to restore last workspace:", e);
+    }
+  },
 
   loadRecentProjects: async () => {
     try {
@@ -102,6 +117,14 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       loadingPaths: [cleanPath],
       dirErrors: {},
     }));
+
+    try {
+      localStorage.setItem("remora_last_workspace_server", serverId);
+      localStorage.setItem("remora_last_workspace_path", cleanPath);
+      if (serverName) {
+        localStorage.setItem("remora_last_workspace_name", serverName);
+      }
+    } catch {}
 
     // Record into SQLite recent_projects
     try {
@@ -170,6 +193,11 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     if (currentServerId) {
       delete updatedRoots[currentServerId];
     }
+    try {
+      localStorage.removeItem("remora_last_workspace_server");
+      localStorage.removeItem("remora_last_workspace_path");
+      localStorage.removeItem("remora_last_workspace_name");
+    } catch {}
     set({
       rootPath: null,
       serverRoots: updatedRoots,
@@ -185,9 +213,14 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     const { currentServerId } = get();
     if (!currentServerId) return;
 
-    set((state) => ({
-      loadingPaths: Array.from(new Set([...state.loadingPaths, dirPath])),
-    }));
+    set((state) => {
+      const nextErrors = { ...state.dirErrors };
+      delete nextErrors[dirPath];
+      return {
+        loadingPaths: Array.from(new Set([...state.loadingPaths, dirPath])),
+        dirErrors: nextErrors,
+      };
+    });
 
     try {
       const entries = await invoke<FileEntry[]>("sftp_read_dir", {
@@ -399,5 +432,12 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
 
   refreshPath: async (path: string) => {
     await get().loadDirectory(path);
+    // If refreshing root or a parent directory, also refresh expanded subdirectories that have cached entries
+    const { expandedPaths, tree } = get();
+    for (const expPath of expandedPaths) {
+      if (expPath !== path && expPath.startsWith(path) && tree[expPath]) {
+        get().loadDirectory(expPath).catch(() => {});
+      }
+    }
   },
 }));
