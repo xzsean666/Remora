@@ -1,15 +1,10 @@
 name: Release Remora
 
-on:
+'on':
   push:
     tags:
       - 'v*'
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release version (e.g. v0.1.8)'
-        required: false
-        default: 'v0.1.8'
 
 jobs:
   build-and-release:
@@ -33,12 +28,8 @@ jobs:
         id: vars
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            INPUT_VER="${{ inputs.version }}"
-            if [ -n "$INPUT_VER" ]; then
-              TAG="$INPUT_VER"
-            else
-              TAG="v$(node -p "require('./package.json').version")"
-            fi
+            PKG_VER=$(jq -r '.version // empty' package.json 2>/dev/null || node -p "require('./package.json').version" 2>/dev/null || grep -m1 '"version"' src-tauri/tauri.conf.json | cut -d'"' -f4)
+            TAG="v${PKG_VER#v}"
           else
             TAG="${{ github.ref_name }}"
           fi

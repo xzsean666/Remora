@@ -5,15 +5,20 @@
 ---
 
 ## 1. 当前目标与任务
-- **当前 Goal**: 修复前端全局对象报错 [object Object] 与同步移动端原生应用图标
+- **当前 Goal**: 优化 GitHub Actions Release 流水线自动引用项目版本
 - **当前 Task**: 
-  - TASK-038: 修复前端全局对象报错 [object Object] 与同步移动端原生应用图标 (Fix Global [object Object] Error Formatting & Sync Android Mobile App Icons) [DONE]
+  - TASK-039: 优化 GitHub Actions Release 流水线自动引用项目版本 (Optimize Release Workflow to Auto-Reference Project Version) [DONE]
 - **当前状态**: DONE
 
 ---
 
 ## 2. 本次会话完成内容
-1. **彻底根除全局报错 [object Object] (TASK-038)**:
+1. **优化 GitHub Actions Release 流水线自动引用项目版本 (TASK-039)**:
+   - **完全移除 `workflow_dispatch` 手动输入表单**: 移除 `inputs.version` 参数，在 GitHub 网页端点击 `Run workflow` 时无需输入任何版本号，一键零配置直接运行。
+   - **多层级安全版本提取机制**: 在 `Determine Version and Tag` 步骤中，优先调用 runner 自带的 `jq` 从 `package.json` 读取当前工程既有版本号，若无则回退至 `node`，若仍无则使用 `grep` 提取 `src-tauri/tauri.conf.json`，自动生成格式规范的 Release 标签（如 `v0.1.9`），保证桌面端与 Android 移动端归档版本绝对一致。
+   - **全兼容 Git Tag 推送**: 依然完整保留对 `push: tags: - 'v*'` 的触发支持。
+
+2. **彻底根除全局报错 [object Object] (TASK-038)**:
    - **Rust 后端自定义序列化**: 为核心 `AppError` 实施自定义 `Serialize`，利用 `thiserror` 格式化直接将错误枚举序列化为带类型前缀的人类可读字符串（如 `"SSH connection error: Connection refused (os error 111)"`），彻底解决 Serde 默认将带参 enum variant 序列化为单键 JSON 对象导致的直接转字符串变 `[object Object]` 缺陷。
    - **后端单元测试覆盖**: 在 `src-tauri/src/core/error.rs` 中增加 `test_app_error_serialization_as_string`，验证各类 `AppError` 序列化输出为纯字符串。
    - **前端通用解析器 `formatErrorMessage`**: 在 `src/utils/tauriBridge.ts` 中实现并导出高韧性格式化函数，针对字符串、标准 Error 实例、Rust Serde 单键 enum、普通错误对象（`message`/`error`/`details`）、任意未知对象（JSON 序列化降级）及无原型对象（`Object.create(null)`）进行防御性解析，永不输出 `[object Object]`。
@@ -31,12 +36,14 @@
 
 ## 3. 修改与创建的文件
 - **新建文件**:
+  - `docs/AI/tasks/TASK-039.md`
   - `docs/AI/tasks/TASK-038.md`
   - `src-tauri/icons/android/mipmap-anydpi-v26/ic_launcher_round.xml`
   - `src-tauri/gen/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml`
   - `src-tauri/gen/android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml`
   - `src-tauri/gen/android/app/src/main/res/values/ic_launcher_background.xml`
 - **修改文件**:
+  - `.github/workflows/release.yml`
   - `src-tauri/src/core/error.rs`
   - `src/utils/tauriBridge.ts`
   - `src/stores/connectionStore.ts`
@@ -65,6 +72,8 @@
 ---
 
 ## 4. 已运行的验证命令及结果
+- `bash Determine Version and Tag script`: 本地模拟 Action 的 Tag 探测脚本，成功直接从工程提取 `v0.1.9`，无任何外部输入依赖。
+- `python3 PyYAML syntax validation`: 验证 `.github/workflows/release.yml` 语法 100% 正确。
 - `pnpm build`: 成功，TypeScript 静态类型检查 0 错误，打包耗时 10.09s。
 - `cargo check --manifest-path src-tauri/Cargo.toml`: 成功，Rust 检查通过。
 - `cargo test --manifest-path src-tauri/Cargo.toml`: 26 项单元测试（含新增 `test_app_error_serialization_as_string`）+ 1 项 e2e 测试全数通过。

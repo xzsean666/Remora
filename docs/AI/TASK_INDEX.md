@@ -47,22 +47,24 @@
 | **TASK-036** | Android 移动端与全平台 SQLite 本地持久化与凭证持久落盘修复 (Android & Multiplatform SQLite Data & Credential Persistence Fix) | TASK-029, TASK-035 | **DONE** | `docs/AI/tasks/TASK-036.md` |
 | **TASK-037** | 修复 GitHub Actions Release 自动构建与发布失败 (Fix GitHub Actions Release Workflow Failure) | TASK-021, TASK-029 | **DONE** | `docs/AI/tasks/TASK-037.md` |
 | **TASK-038** | 修复前端全局对象报错 [object Object] 与同步移动端原生应用图标 (Fix Global [object Object] Error Formatting & Sync Android Mobile App Icons) | TASK-029, TASK-036, TASK-037 | **DONE** | `docs/AI/tasks/TASK-038.md` |
+| **TASK-039** | 优化 GitHub Actions Release 流水线自动引用项目版本 (Optimize Release Workflow to Auto-Reference Project Version) | TASK-037 | **DONE** | `docs/AI/tasks/TASK-039.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 39
+- **已完成 (DONE)**: 40
 - **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 39
+- **总任务数**: 40
 
 ---
 
 ## 3. 项目执行总结
 
 - Remora 核心功能、远程代理注入、前后端集成、自动化构建发布体系全部就绪。
+- **TASK-039** 圆满完成：优化 GitHub Actions Release 流水线，彻底移除 `workflow_dispatch` 手动输入 tag 版本的表单。在 GitHub Actions 网页端点击 `Run workflow` 时无需填写任何参数；流水线通过 `jq` / `node` / `grep` 多重安全策略自动从 `package.json` 或 `tauri.conf.json` 中读取工程既有版本号并规范化为 Release Tag（如 `v0.1.9`），实现一键零配置全自动跨平台发布。
 - **TASK-038** 圆满完成：彻底消除全局报错呈现 `[object Object]` 问题。在 Rust 后端为核心 `AppError` 实施自定义 `Serialize` 直接序列化为人类可读格式；在前端 `tauriBridge` 中实现兼具 Rust Serde Enum 单键提取、标准 Error 与通用对象降级的 `formatErrorMessage` 并由 `safeInvoke` 全面托管重抛具备友好 `message` 与 `.toString()` 的错误实例；完成 Android 移动端原生应用图标与自适应图标（`mipmap-anydpi-v26`）的全面替换，背景精准匹配 Remora 暗黑品牌色 `#181820`，并在 `build.sh` 中建立构建前自动资源同步保障，彻底根除模板旧图标与绿色机器人残留。
 - **TASK-035** 圆满完成：实现同一 TMUX 会话全局独占单终端约束。用户在 TMUX 会话列表中点击进入已存在的会话时，自动关闭该会话此前打开的旧终端并释放后端通道，防止终端堆积；终端标题优化为 `<sessionName> (tmux) [server]`，确保会话名置于最前，并在标签栏增加专属琥珀色 `Layers` 图标与宽屏自适应显示。
 - **TASK-036** 圆满完成：彻底根除 Android 移动端进程完全划掉/Kill 退出后配置信息丢失问题。通过 Tauri 2 `app.path().app_data_dir()` 官方路径解析器将 SQLite 数据库与凭证持久化至 Android 应用专属沙盒目录（`/data/user/0/com.remora.app/files`），解决此前 `dirs::data_dir()` 在移动端返回 `None` 导致静默回退至内存数据库的严重缺陷；为 `KeyringService` 增加私有沙盒文件持久化回退，保证移动端 SSH 密码与私钥口令跨进程重启不丢失。
