@@ -184,6 +184,7 @@ impl ConnectionManager {
                     return Err(AppError::Security(err_msg));
                 }
             }
+            #[cfg(unix)]
             AuthType::Agent => {
                 match russh::keys::agent::client::AgentClient::connect_env().await {
                     Ok(mut agent) => {
@@ -217,6 +218,65 @@ impl ConnectionManager {
                         Err(russh::Error::NoAuthMethod)
                     }
                 }
+            }
+            #[cfg(windows)]
+            AuthType::Agent => {
+                let mut authenticated = false;
+                // 1. Try Windows OpenSSH named pipe
+                if let Ok(mut agent) = russh::keys::agent::client::AgentClient::connect_named_pipe(r"\\.\pipe\openssh-ssh-agent").await {
+                    if let Ok(identities) = agent.request_identities().await {
+                        for identity in identities {
+                            let key = identity.public_key().into_owned();
+                            if let Ok(russh::client::AuthResult::Success) =
+                                handle
+                                    .authenticate_publickey_with(
+                                         &server.username,
+                                         key,
+                                         None,
+                                         &mut agent,
+                                    )
+                                    .await
+                            {
+                                authenticated = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                // 2. Try Pageant if named pipe was not successful
+                if !authenticated {
+                    if let Ok(mut agent) = russh::keys::agent::client::AgentClient::connect_pageant().await {
+                        if let Ok(identities) = agent.request_identities().await {
+                            for identity in identities {
+                                let key = identity.public_key().into_owned();
+                                if let Ok(russh::client::AuthResult::Success) =
+                                    handle
+                                        .authenticate_publickey_with(
+                                             &server.username,
+                                             key,
+                                             None,
+                                             &mut agent,
+                                        )
+                                        .await
+                                {
+                                    authenticated = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if authenticated {
+                    Ok(russh::client::AuthResult::Success)
+                } else {
+                    warn!("SSH Agent (named pipe / Pageant) unavailable or failed to authenticate");
+                    Err(russh::Error::NoAuthMethod)
+                }
+            }
+            #[cfg(not(any(unix, windows)))]
+            AuthType::Agent => {
+                warn!("SSH Agent is not supported on this platform");
+                Err(russh::Error::NoAuthMethod)
             }
         };
 

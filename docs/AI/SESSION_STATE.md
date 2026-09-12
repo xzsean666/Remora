@@ -42,6 +42,8 @@
        - macOS: `.dmg`
      - Android 独立作业：生成 `.apk`；
      - 统一将四大平台（deb, apk, mac, windows）全部构建产物一次性发布到同一个 Release 页面。
+   - **Windows 原生构建兼容性修复**:
+     - 修复 `russh` 的 `AgentClient::connect_env()` 仅在 Unix 生效导致的 Windows MSVC 编译错误 `E0599`，增加 `#[cfg(windows)]` 下自动兼容 OpenSSH Named Pipe (`\\.\pipe\openssh-ssh-agent`) 与 Pageant。
 
 3. **文档与规范同步**:
    - 编写并创建 `docs/AI/tasks/TASK-047.md` 与 `docs/AI/tasks/TASK-048.md`；
