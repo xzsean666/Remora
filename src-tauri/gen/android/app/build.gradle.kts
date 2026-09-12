@@ -24,6 +24,34 @@ android {
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
+    signingConfigs {
+        create("release") {
+            val envKsPath = System.getenv("ANDROID_KEYSTORE_PATH")
+            val ksFile = if (!envKsPath.isNullOrBlank()) {
+                val f = file(envKsPath)
+                if (f.isAbsolute) f else rootProject.file("../../$envKsPath")
+            } else {
+                rootProject.file("../../remora-release.keystore")
+            }
+
+            val ksPass = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            val kAlias = System.getenv("ANDROID_KEY_ALIAS")
+            val kPass = System.getenv("ANDROID_KEY_PASSWORD") ?: ksPass
+
+            if (ksFile.exists() && !ksPass.isNullOrBlank() && !kAlias.isNullOrBlank()) {
+                storeFile = ksFile
+                storePassword = ksPass
+                keyAlias = kAlias
+                keyPassword = kPass
+            } else {
+                val debugConfig = getByName("debug")
+                storeFile = debugConfig.storeFile
+                storePassword = debugConfig.storePassword
+                keyAlias = debugConfig.keyAlias
+                keyPassword = debugConfig.keyPassword
+            }
+        }
+    }
     buildTypes {
         getByName("debug") {
             manifestPlaceholders["usesCleartextTraffic"] = "true"
@@ -37,7 +65,7 @@ android {
             }
         }
         getByName("release") {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

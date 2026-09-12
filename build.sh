@@ -47,6 +47,14 @@ log_error() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
+# 自动加载 .env 环境变量 (如果存在，用于读取 Android 签名密钥等配置)
+if [ -f "${SCRIPT_DIR}/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/.env"
+  set +a
+fi
+
 # 提取项目版本号 (优先从 tauri.conf.json 读取，兜底从 package.json 读取)
 APP_VERSION=""
 if [ -f "${SCRIPT_DIR}/src-tauri/tauri.conf.json" ]; then
@@ -417,6 +425,9 @@ fi
 # Android APK 构建独立分支
 if [ "$BUILD_MODE" = "apk" ]; then
   log_info "开始构建 Remora Android APK..."
+  if [ -n "${ANDROID_KEYSTORE_PASSWORD:-}" ] && [ -n "${ANDROID_KEY_ALIAS:-}" ]; then
+    log_info "检测到 Android Release 签名配置 (${ANDROID_KEY_ALIAS})，已启用一致性签名构建 (免卸载无缝更新)"
+  fi
 
   TAURI_ANDROID_ARGS=("android" "build" "--apk")
   if [ -n "${TAURI_TARGET:-}" ]; then

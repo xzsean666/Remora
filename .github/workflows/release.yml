@@ -191,6 +191,26 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      - name: Configure Android Release Signing Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "Decoding Android Release Signing Keystore from GitHub Secrets..."
+            KEYSTORE_PATH="${{ runner.temp }}/remora-release.keystore"
+            echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
+            echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> $GITHUB_ENV
+            echo "ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> $GITHUB_ENV
+            echo "ANDROID_KEY_ALIAS=$KEY_ALIAS" >> $GITHUB_ENV
+            echo "ANDROID_KEY_PASSWORD=${KEY_PASSWORD:-$KEYSTORE_PASSWORD}" >> $GITHUB_ENV
+            echo "Android release keystore configured successfully."
+          else
+            echo "No ANDROID_KEYSTORE_BASE64 secret found, falling back to debug signing."
+          fi
+
       - name: Build Android APK
         run: |
           ./build.sh --apk --no-bump

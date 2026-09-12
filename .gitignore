@@ -3,6 +3,11 @@ node_modules/
 dist/
 dist-ssr/
 *.local
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
 
 # Rust
 src-tauri/target/
