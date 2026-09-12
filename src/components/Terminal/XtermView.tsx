@@ -8,6 +8,7 @@ import { safeInvoke, formatErrorMessage } from "../../utils/tauriBridge";
 import { TerminalSession, useTerminalStore } from "../../stores/terminalStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useLayoutStore } from "../../stores/layoutStore";
+import { useFileTreeStore } from "../../stores/fileTreeStore";
 
 /**
  * Searches for standard tmux startup / alternate screen sequences:
@@ -111,18 +112,42 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
     });
 
     // Listen to shell prompt OSC title changes to track remote working directory in real-time
+    // and automatically refresh workspace file tree when command finishes and returns to prompt
+    let refreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     term.onTitleChange((title) => {
       if (title) {
         const match = title.match(/:\s*(~?\/[^\x07\x1b\r\n]*)/);
         if (match && match[1]) {
           useTerminalStore.getState().updateSessionCurrentDir(session.id, match[1].trim());
         }
+        if (refreshDebounceTimer) clearTimeout(refreshDebounceTimer);
+        refreshDebounceTimer = setTimeout(() => {
+          const { rootPath, refreshPath } = useFileTreeStore.getState();
+          if (rootPath) {
+            refreshPath(rootPath).catch(() => {});
+          }
+        }, 800);
       }
     });
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(containerRef.current);
+
+    // Stop xterm internal mouse-tracking from capturing right-click (e.button === 2) when in TMUX or alternate screens.
+    // When mouse tracking is enabled, xterm swallows right-click and sends SGR escape sequences to TMUX,
+    // which triggers tmux's internal ASCII popup menu instead of the standard terminal right-click menu (paste/copy).
+    // Intercepting button === 2 in capture phase allows the event to proceed directly to contextmenu and xterm's rightClickHandler.
+    const containerEl = containerRef.current;
+    const handleMouseCapture = (e: MouseEvent) => {
+      if (e.button === 2) {
+        e.stopImmediatePropagation();
+      }
+    };
+    if (containerEl) {
+      containerEl.addEventListener("mousedown", handleMouseCapture, true);
+      containerEl.addEventListener("mouseup", handleMouseCapture, true);
+    }
 
     // Try loading WebGL hardware acceleration, fallback gracefully
     try {
@@ -197,7 +222,10 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       // Ensure tmux attach command is always present if session is associated with tmux
       const tmuxName = session.tmuxSessionName;
       if (tmuxName && !session.pendingCommand) {
-        useTerminalStore.getState().setPendingCommand(session.id, `tmux attach -d -t "${tmuxName}"\n`);
+        useTerminalStore.getState().setPendingCommand(
+          session.id,
+          `tmux set -g mouse on 2>/dev/null; tmux unbind-key -n MouseDown3Pane 2>/dev/null; tmux unbind-key -n MouseDown3Status 2>/dev/null; tmux unbind-key -n MouseDown3StatusLeft 2>/dev/null; tmux unbind-key -n M-MouseDown3Pane 2>/dev/null; tmux attach -d -t "${tmuxName}"\n`
+        );
       }
 
       if (isTmuxSession) {
@@ -404,10 +432,15 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       if (textareaClearTimer) clearTimeout(textareaClearTimer);
       if (connectTimeout) clearTimeout(connectTimeout);
       if (tmuxSafetyTimeout) clearTimeout(tmuxSafetyTimeout);
+      if (refreshDebounceTimer) clearTimeout(refreshDebounceTimer);
       if (textarea) {
         textarea.removeEventListener("compositionstart", handleCompositionStart);
         textarea.removeEventListener("compositionupdate", handleCompositionUpdate);
         textarea.removeEventListener("compositionend", handleCompositionEnd);
+      }
+      if (containerEl) {
+        containerEl.removeEventListener("mousedown", handleMouseCapture, true);
+        containerEl.removeEventListener("mouseup", handleMouseCapture, true);
       }
       resizeObserver.disconnect();
       const currentBackendId = backendSessionIdRef.current;

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { safeInvoke as invoke, formatErrorMessage } from "../utils/tauriBridge";
+import { useConnectionStore } from "./connectionStore";
 
 export interface FileEntry {
   name: string;
@@ -210,8 +211,14 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   },
 
   loadDirectory: async (dirPath: string) => {
-    const { currentServerId } = get();
-    if (!currentServerId) return;
+    let serverId = get().currentServerId;
+    if (!serverId) {
+      serverId = useConnectionStore.getState().activeServerId;
+      if (serverId) {
+        set({ currentServerId: serverId });
+      }
+    }
+    if (!serverId) return;
 
     set((state) => {
       const nextErrors = { ...state.dirErrors };
@@ -224,7 +231,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
 
     try {
       const entries = await invoke<FileEntry[]>("sftp_read_dir", {
-        serverId: currentServerId,
+        serverId,
         path: dirPath,
       });
 
@@ -248,7 +255,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   },
 
   toggleExpand: async (dirPath: string) => {
-    const { expandedPaths, tree } = get();
+    const { expandedPaths } = get();
     const isExpanded = expandedPaths.includes(dirPath);
 
     if (isExpanded) {
@@ -257,10 +264,8 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       });
     } else {
       set({ expandedPaths: [...expandedPaths, dirPath] });
-      // If not loaded yet, fetch from server
-      if (!tree[dirPath]) {
-        await get().loadDirectory(dirPath);
-      }
+      // Always fetch latest entries from server upon expanding to guarantee remote new files appear
+      await get().loadDirectory(dirPath);
     }
   },
 
@@ -431,12 +436,34 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   },
 
   refreshPath: async (path: string) => {
-    await get().loadDirectory(path);
-    // If refreshing root or a parent directory, also refresh expanded subdirectories that have cached entries
-    const { expandedPaths, tree } = get();
-    for (const expPath of expandedPaths) {
-      if (expPath !== path && expPath.startsWith(path) && tree[expPath]) {
-        get().loadDirectory(expPath).catch(() => {});
+    let serverId = get().currentServerId;
+    if (!serverId) {
+      serverId = useConnectionStore.getState().activeServerId;
+      if (serverId) {
+        set({ currentServerId: serverId });
+      }
+    }
+    if (!serverId) return;
+
+    // Normalize path (strip trailing slash unless root '/')
+    const cleanPath = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+
+    // 1. Refresh target directory first
+    await get().loadDirectory(cleanPath);
+
+    // 2. Also refresh all currently expanded subdirectories under this path
+    const { expandedPaths } = get();
+    const prefix = cleanPath === "/" ? "/" : `${cleanPath}/`;
+    const subPaths = expandedPaths.filter(
+      (expPath) => expPath !== cleanPath && (cleanPath === "/" || expPath.startsWith(prefix))
+    );
+
+    // Sequentially await refreshing expanded subdirectories to avoid SFTP mutex thrashing
+    for (const subPath of subPaths) {
+      try {
+        await get().loadDirectory(subPath);
+      } catch (err) {
+        console.warn(`Failed to refresh expanded subdirectory ${subPath}:`, err);
       }
     }
   },

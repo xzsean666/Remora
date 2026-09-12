@@ -5,60 +5,43 @@
 ---
 
 ## 当前目标与任务
-- **当前 Goal**: 修复移动端与桌面端布局/滚轮缺陷，实现 TMUX 工作路径继承，并构建 VS Code 风格轻量级 Git 可视化核心体系
+- **当前 Goal**: 统一 TMUX 与普通终端右键系统菜单交互（粘贴/复制），根治远端文件浏览器新文件未刷新与按钮失效缺陷
 - **当前 Task**: 
-  - TASK-043: 移动端 Tab 栏胶囊溢出修复与桌面端终端状态栏重叠布局优化 [DONE]
-  - TASK-044: TMUX 工作路径自动继承与终端鼠标滚轮日志输出平滑滚动修复 [DONE]
-  - TASK-045: VS Code 风格轻量级 Git 可视化与分支切换管理系统 [DONE]
+  - TASK-046: TMUX 右键系统菜单统一与远端文件浏览器实时刷新增强 [DONE]
 - **当前状态**: DONE
 
 ---
 
 ## 2. 本次会话完成内容
-1. **移动端底部 Tab 栏胶囊溢出修复与桌面端终端状态栏重叠布局优化 (TASK-043)**:
-   - **移动端底部导航栏 UI 重构**: 解决移动端激活 Tab 蓝色底框突起及越界溢出问题。重构为圆角内嵌胶囊形态（`rounded-full bg-vscode-activityBarActive/15`），高度调整为 `min-h-[50px] pb-[env(safe-area-inset-bottom)]` 完美自适应全面屏安全手势区；在移动端隐藏桌面 StatusBar，消除双底栏视觉冲突。
-   - **桌面端终端与状态栏重叠根除**: 消除桌面端终端底部与 StatusBar 贴边或字符被截断的重叠问题。为主工作区容器赋予 `min-h-0` 规范 Flexbox 伸缩；StatusBar 增加顶部微阴影与深色分割线；解耦 `XtermView` 的 `containerRef` 挂载点与外层安全呼吸 padding，使得 `FitAddon` 视口计算与 canvas 渲染绝对精准。
+1. **TMUX 右键系统上下文菜单统一 (TASK-046)**:
+   - **根本根因定位**: TASK-044 开启了 `set -g mouse on` 支持滚轮，但 xterm.js 在 mouse-tracking 开启后默认会将右键（`button === 2`）截获并打包为 SGR 转义序列发送到远程 PTY，触发 TMUX 默认绑定 `MouseDown3Pane display-menu`，弹出了由 ASCII 文本拼成的 TMUX 内部操作菜单（split/kill 等），阻止了系统级右键菜单弹出。
+   - **DOM 捕获阶段拦截（客户端全量保障）**: 在 `XtermView.tsx` 容器节点上挂载 capture 模式的 `mousedown` 与 `mouseup` 拦截器，捕获 `e.button === 2` 并在 DOM 源头调用 `e.stopImmediatePropagation()`。xterm.js 不会截获右键转为转义序列发给远端，事件正常冒泡触发系统 `contextmenu` 菜单，弹出与普通终端完全相同的复制/粘贴菜单。
+   - **服务端解绑保障（全机型通用）**: 在 `terminalStore.ts`（接入与续连 TMUX）以及 `src-tauri/src/lib.rs`（新建 TMUX 会话）的执行指令中，统一注入 `tmux unbind-key -n MouseDown3Pane 2>/dev/null; tmux unbind-key -n MouseDown3Status 2>/dev/null; tmux unbind-key -n MouseDown3StatusLeft 2>/dev/null; tmux unbind-key -n M-MouseDown3Pane 2>/dev/null;`。无需在任何服务器上预配 `.tmux.conf`，连接任意机器均自动生效。
 
-2. **TMUX 工作路径自动继承与滚轮输出平滑滚动修复 (TASK-044)**:
-   - **终端路径动态感知与 TMUX 自动继承**: 在 `XtermView` 中通过 `term.onTitleChange` 实时解析远端 shell OSC 标题中的 cwd（`user@host: dir`）并同步至 `terminalStore.currentDir`；在 `TmuxManagerModal` 中自动探测并填入当前路径；Rust 后端 `tmux_new_session` 支持 `-c "<safe_dir>"` 锁定工作路径。
-   - **TMUX 滚轮浏览日志平滑滚动**: 解决在 TMUX 运行 `agya` 等 CLI 时滚轮变成翻动历史输入词的问题。在 TMUX 新建及 `pendingCommand` attach 指令中强制注入 `tmux set -g mouse on`，使 TMUX 原生接管滚轮进入 copy-mode 滚动浏览终端日志；在 `XtermView` 中挂载 `attachCustomWheelEventHandler`，在 alternate screen 模式拦截将滚轮转译为方向键的默认行为，彻底消除 AI CLI 历史命令切换冲突。
+2. **远端文件浏览器可靠刷新与实时自动感知 (TASK-046)**:
+   - **消除并发互斥冲突**: `fileTreeStore.ts` 的 `refreshPath` 原先对展开的子目录使用非阻塞并发刷新，容易因 SFTP 通道互斥锁竞争导致超时或丢状态。重构为首先 `await loadDirectory(cleanPath)`，然后按序遍历所有已展开的子目录并逐一 `await loadDirectory(subPath)`，确保每一级目录的数据都准确获取并落盘。
+   - **折叠展开始终重拉**: `toggleExpand` 展开目录时，无论内存中是否有缓存，均强制 `await get().loadDirectory(dirPath)` 向远端重新获取最新数据。
+   - **服务器标识容错回退**: `loadDirectory` 在 `currentServerId` 缺失时自动回退为 `useConnectionStore.getState().activeServerId` 并回填，避免静默失败。
+   - **OpenSSH SFTP ~ 兼容**: 在 `src-tauri/src/sftp/service.rs` 中，对 `~` 或 `~/` 路径自动调用 `sftp.canonicalize(".")` 解析为远端用户 home 绝对路径，杜绝抛出 `SSH_FX_NO_SUCH_FILE`。
+   - **UI 旋转加载动画与防连击**: 在 `ProjectExplorer.tsx` 中为刷新按钮添加 `isRefreshing` 状态，刷新进行时图标呈现 `animate-spin` 旋转动效，并禁用按钮防止重复点击。
+   - **终端命令结束 Prompt 防抖自动感知**: 在 `XtermView.tsx` 中监听 `term.onTitleChange`，当终端命令执行完毕返回 shell prompt 时，自动防抖 800ms 调用 `refreshPath(rootPath)`，无需用户手动点击刷新按钮即可感知新生成的文件。
 
-3. **VS Code 风格轻量级 Git 可视化与分支切换管理系统 (TASK-045)**:
-   - **Rust 后端 Git 复合指令体系**: 在 `src-tauri/src/lib.rs` 中实现 `git_get_status`（一站式判断 work-tree、提取 HEAD 分支、本地分支列表与 porcelain 改动状态列表）、`git_checkout`（切换与基于当前 HEAD 创建新分支）、`git_get_diff`（提取单个文件 unified diff 内容）。
-   - **VS Code 风格前端 Git 体系**:
-     - 创建 `useGitStore` 全局管理分支、改动文件列表与 Diff 数据；
-     - 在 ActivityBar 增加标准的 Source Control 图标及改动文件数量蓝色角标（Badge）；
-     - 在 StatusBar 左侧增加当前分支指示与改动数量，点击即可唤出分支弹窗；
-     - 实现 `GitPanel` 侧边栏面板，按修改/未跟踪/删除状态清晰呈现文件列表，支持一键刷新、点击在编辑器打开文件、点击查看 Diff；
-     - 实现内置 Diff 视窗，支持增删改动行红绿高亮对比与代码滚动；
-     - 实现 `BranchSwitchModal` 快速分支切换弹窗，支持关键词搜索、点击切换与一键创建并切换新分支。
-
-4. **文档规范与任务追踪同步**:
-   - 创建 `docs/AI/tasks/TASK-043.md`、`TASK-044.md`、`TASK-045.md`；
-   - 更新 `docs/AI/TASK_INDEX.md`，将任务总数递增至 46 项并全量保持 DONE。
+3. **文档规范与任务追踪同步**:
+   - 创建 `docs/AI/tasks/TASK-046.md`；
+   - 更新 `docs/AI/TASK_INDEX.md`，将任务总数递增至 47 项并全量保持 DONE。
 
 ---
 
 ## 3. 修改与创建的文件
 - **新建文件**:
-  - `src/stores/gitStore.ts`
-  - `src/components/Sidebar/Git/GitPanel.tsx`
-  - `src/components/Sidebar/Git/BranchSwitchModal.tsx`
-  - `docs/AI/tasks/TASK-043.md`
-  - `docs/AI/tasks/TASK-044.md`
-  - `docs/AI/tasks/TASK-045.md`
+  - `docs/AI/tasks/TASK-046.md`
 - **修改文件**:
-  - `src-tauri/src/lib.rs`
-  - `src/App.tsx`
-  - `src/components/ActivityBar/ActivityBar.tsx`
-  - `src/components/Layout/MobileTabBar.tsx`
-  - `src/components/Sidebar/SidebarContainer.tsx`
-  - `src/components/StatusBar/StatusBar.tsx`
-  - `src/components/Terminal/TmuxManagerModal.tsx`
   - `src/components/Terminal/XtermView.tsx`
-  - `src/stores/layoutStore.ts`
   - `src/stores/terminalStore.ts`
-  - `src/utils/tauriBridge.ts`
+  - `src/stores/fileTreeStore.ts`
+  - `src/components/Sidebar/ProjectExplorer/ProjectExplorer.tsx`
+  - `src-tauri/src/lib.rs`
+  - `src-tauri/src/sftp/service.rs`
   - `docs/AI/TASK_INDEX.md`
   - `docs/AI/SESSION_STATE.md`
 
@@ -66,12 +49,10 @@
 
 ## 4. 已运行的验证命令及结果
 - `cargo check --manifest-path src-tauri/Cargo.toml`: 检查通过，0 错误 0 警告。
+- `pnpm tsc --noEmit`: 前端 TypeScript 静态类型检查 0 报错通过。
 - `cargo test --manifest-path src-tauri/Cargo.toml`: 26 项单元测试 + 1 项 e2e 测试 100% 全部通过。
-- `pnpm tsc --noEmit`: 前端 TypeScript 静态类型检查 0 报错。
-- `pnpm build`: Vite 生产打包 100% 成功，所有前端资产优化构建完成。
 
 ---
 
-## 5. 未解决问题与剩余风险
-- 无。5 项需求全部高标准交付并验证完毕。
-
+## 5. 承诺与约束说明
+- **严格遵循用户指示**: 本地 Release 构建与 Actions 构建完全交由用户自己执行，AI 代理不运行 `./build.sh`。

@@ -735,7 +735,7 @@ async fn tmux_new_session(
             cmd.push_str(&format!(" -c \"{}\"", safe_dir));
         }
     }
-    cmd.push_str(" \\; set -g mouse on");
+    cmd.push_str(" \\; set -g mouse on \\; unbind-key -n MouseDown3Pane \\; unbind-key -n MouseDown3Status \\; unbind-key -n MouseDown3StatusLeft \\; unbind-key -n M-MouseDown3Pane");
     state.connection.exec_command(&server_id, &cmd).await?;
     Ok(())
 }

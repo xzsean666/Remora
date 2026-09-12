@@ -72,7 +72,16 @@ impl SftpService {
         let session_arc = self.get_or_create_session(server_id).await?;
         let sftp = session_arc.lock().await;
 
-        let entries_res = sftp.read_dir(path).await;
+        let target_path = if path == "~" {
+            sftp.canonicalize(".").await.unwrap_or_else(|_| "/root".to_string())
+        } else if let Some(sub) = path.strip_prefix("~/") {
+            let home = sftp.canonicalize(".").await.unwrap_or_else(|_| "/root".to_string());
+            format!("{}/{}", home.trim_end_matches('/'), sub)
+        } else {
+            path.to_string()
+        };
+
+        let entries_res = sftp.read_dir(&target_path).await;
         match entries_res {
             Ok(dir_stream) => {
                 let mut entries = Vec::new();

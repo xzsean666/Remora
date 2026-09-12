@@ -95,6 +95,17 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
   const [modalTargetServerId, setModalTargetServerId] = useState<string | null>(null);
   const [connectingServerId, setConnectingServerId] = useState<string | null>(null);
   const [conflicts, setConflicts] = useState<FileConflictItem[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    if (isRefreshing || !rootPath) return;
+    setIsRefreshing(true);
+    try {
+      await refreshPath(rootPath);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const lastProcessedDropRef = React.useRef<{ key: string; time: number }>({ key: "", time: 0 });
 
@@ -438,14 +449,19 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
               <FolderOpen className="w-3.5 h-3.5" />
             </button>
             <button
-              onClick={() => {
-                loadServers();
-                loadRecentProjects();
+              disabled={isRefreshing}
+              onClick={async () => {
+                setIsRefreshing(true);
+                try {
+                  await Promise.all([loadServers(), loadRecentProjects()]);
+                } finally {
+                  setIsRefreshing(false);
+                }
               }}
-              title="Refresh Servers & Projects"
-              className="p-1 hover:text-white hover:bg-vscode-hover rounded transition-colors text-vscode-textMuted"
+              title="Refresh Servers & Projects / 刷新服务器与最近项目"
+              className="p-1 hover:text-white hover:bg-vscode-hover rounded transition-colors text-vscode-textMuted disabled:opacity-50 cursor-pointer"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-vscode-activityBarActive" : ""}`} />
             </button>
           </div>
         </div>
@@ -912,11 +928,12 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
             <FolderPlus className="w-3.5 h-3.5" />
           </button>
           <button
-            title="Refresh Explorer"
-            onClick={() => refreshPath(rootPath)}
-            className="p-1 hover:text-white hover:bg-vscode-hover rounded transition-colors"
+            title="Refresh Explorer / 刷新文件目录"
+            disabled={isRefreshing}
+            onClick={handleRefresh}
+            className="p-1 hover:text-white hover:bg-vscode-hover rounded transition-colors disabled:opacity-50 cursor-pointer"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-vscode-activityBarActive" : ""}`} />
           </button>
           <button
             title="Collapse All Folders"

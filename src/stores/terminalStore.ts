@@ -44,6 +44,13 @@ interface TerminalState {
   initTerminalListener: () => Promise<() => void>;
 }
 
+// Standard tmux setup command injected before attaching to any session:
+// 1. set -g mouse on: enables native scroll wheel navigation into copy-mode
+// 2. unbind-key -n MouseDown3*: unbinds tmux's default ASCII context menus (Horizontal/Vertical split, Kill, etc.)
+//    so that the desktop/webview native right-click context menu (Paste/Copy) functions identically to normal terminals.
+export const TMUX_SETUP_AND_ATTACH = (name: string) =>
+  `tmux set -g mouse on 2>/dev/null; tmux unbind-key -n MouseDown3Pane 2>/dev/null; tmux unbind-key -n MouseDown3Status 2>/dev/null; tmux unbind-key -n MouseDown3StatusLeft 2>/dev/null; tmux unbind-key -n M-MouseDown3Pane 2>/dev/null; tmux attach -d -t "${name}"\n`;
+
 export const useTerminalStore = create<TerminalState>((set, get) => ({
   sessions: [],
   activeSessionId: null,
@@ -58,34 +65,25 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   openTmuxSession: ({ serverId, serverName, sessionName, initialDir, remoteProxy }) => {
     const { sessions } = get();
 
-    // 1. 查找属于同一服务器且绑定同一 TMUX 会话的所有历史终端（包括新旧标题格式）
+    // 1. 查找是否已存在同名 TMUX 终端（无论其处于 connected 还是 disconnected 状态）
     const matchingIndices: number[] = [];
-    const matchingSessions: TerminalSession[] = [];
-
     sessions.forEach((s, idx) => {
-      const isSameServer = s.serverId === serverId;
-      const isSameTmux =
-        s.tmuxSessionName === sessionName ||
-        (!s.tmuxSessionName &&
-          (s.title.startsWith(`${sessionName} (tmux)`) ||
-            s.title.includes(`tmux: ${sessionName}`) ||
-            s.title.includes(`tmux:${sessionName}`)));
-      if (isSameServer && isSameTmux) {
+      if (s.serverId === serverId && s.tmuxSessionName === sessionName) {
         matchingIndices.push(idx);
-        matchingSessions.push(s);
       }
     });
 
-    // 2. 彻底释放关闭之前所有重复/旧终端的底层后端 PTY 通道
-    for (const old of matchingSessions) {
-      if (old.backendSessionId) {
-        safeInvoke("terminal_close", { sessionId: old.backendSessionId }).catch(() => {});
+    // 2. 如果已经存在且处于连接或连接中状态，优先直接切回该 Tab 并重聚焦
+    if (matchingIndices.length > 0) {
+      const existing = sessions[matchingIndices[0]];
+      if (existing.status === "connected" || existing.status === "connecting") {
+        set({ activeSessionId: existing.id });
+        return existing.id;
       }
     }
 
-    // 3. 计算槽位号，避开其他会话
-    const remainingSessions = sessions.filter((_, idx) => !matchingIndices.includes(idx));
-    const usedSlots = new Set(remainingSessions.map((s) => s.slotNumber).filter(Boolean));
+    // 3. 分配稳定 Slot 编号 (保留用户最直观的快捷键槽位)
+    const usedSlots = new Set(sessions.map((s) => s.slotNumber ?? 0));
     let slotNumber = 1;
     while (usedSlots.has(slotNumber)) slotNumber++;
 
@@ -104,7 +102,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       currentDir: initialDir,
       remoteProxy,
       status: "connecting",
-      pendingCommand: `tmux set -g mouse on 2>/dev/null; tmux attach -d -t "${sessionName}"\n`,
+      pendingCommand: TMUX_SETUP_AND_ATTACH(sessionName),
       tmuxSessionName: sessionName,
       slotNumber,
     };
@@ -207,7 +205,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       const session = state.sessions.find((s) => s.id === id);
       let pending = session?.pendingCommand;
       if (!pending && session?.tmuxSessionName) {
-        pending = `tmux set -g mouse on 2>/dev/null; tmux attach -d -t "${session.tmuxSessionName}"\n`;
+        pending = TMUX_SETUP_AND_ATTACH(session.tmuxSessionName);
       }
       if (backendId && pending) {
         const delay = session?.tmuxSessionName ? 50 : 120;
@@ -266,7 +264,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }
 
     const pendingCmd = tmuxName
-      ? `tmux set -g mouse on 2>/dev/null; tmux attach -d -t "${tmuxName}"\n`
+      ? TMUX_SETUP_AND_ATTACH(tmuxName)
       : old.pendingCommand;
 
     // Clean up old backend session in background (non-blocking)
