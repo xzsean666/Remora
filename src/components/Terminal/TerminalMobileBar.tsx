@@ -89,6 +89,18 @@ export const TerminalMobileBar: React.FC<TerminalMobileBarProps> = ({ onToggleSn
       action: () => sendDataToActiveTerminal("\x1b[B"),
     },
     {
+      label: "PgUp",
+      action: () => sendDataToActiveTerminal("\x1b[5~"),
+      title: "向上翻页/滚动历史 (Page Up)",
+      highlight: true,
+    },
+    {
+      label: "PgDn",
+      action: () => sendDataToActiveTerminal("\x1b[6~"),
+      title: "向下翻页/滚动历史 (Page Down)",
+      highlight: true,
+    },
+    {
       label: "←",
       action: () => sendDataToActiveTerminal("\x1b[D"),
     },

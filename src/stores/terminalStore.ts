@@ -46,10 +46,11 @@ interface TerminalState {
 
 // Standard tmux setup command injected before attaching to any session:
 // 1. set -g mouse on: enables native scroll wheel navigation into copy-mode
-// 2. unbind-key -n MouseDown3*: unbinds tmux's default ASCII context menus (Horizontal/Vertical split, Kill, etc.)
+// 2. bind -n WheelUpPane / WheelDownPane: immediate smooth scroll response on first wheel/touch gesture
+// 3. unbind-key -n MouseDown3*: unbinds tmux's default ASCII context menus (Horizontal/Vertical split, Kill, etc.)
 //    so that the desktop/webview native right-click context menu (Paste/Copy) functions identically to normal terminals.
 export const TMUX_SETUP_AND_ATTACH = (name: string) =>
-  `tmux set -g mouse on 2>/dev/null; tmux unbind-key -n MouseDown3Pane 2>/dev/null; tmux unbind-key -n MouseDown3Status 2>/dev/null; tmux unbind-key -n MouseDown3StatusLeft 2>/dev/null; tmux unbind-key -n M-MouseDown3Pane 2>/dev/null; tmux attach -d -t "${name}"\n`;
+  `tmux set -g mouse on 2>/dev/null; tmux bind -n WheelUpPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M" "if -Ft= '#{pane_in_mode}' 'send-keys -M' 'copy-mode -e; send-keys -M'" 2>/dev/null; tmux bind -n WheelDownPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M" "if -Ft= '#{pane_in_mode}' 'send-keys -M' ''" 2>/dev/null; tmux unbind-key -n MouseDown3Pane 2>/dev/null; tmux unbind-key -n MouseDown3Status 2>/dev/null; tmux unbind-key -n MouseDown3StatusLeft 2>/dev/null; tmux unbind-key -n M-MouseDown3Pane 2>/dev/null; tmux attach -d -t "${name}"\n`;
 
 export const useTerminalStore = create<TerminalState>((set, get) => ({
   sessions: [],

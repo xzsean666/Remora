@@ -5,7 +5,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Channel } from "@tauri-apps/api/core";
 import { RotateCcw, RefreshCw, X } from "lucide-react";
 import { safeInvoke, formatErrorMessage } from "../../utils/tauriBridge";
-import { TerminalSession, useTerminalStore } from "../../stores/terminalStore";
+import { TerminalSession, useTerminalStore, TMUX_SETUP_AND_ATTACH } from "../../stores/terminalStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useLayoutStore } from "../../stores/layoutStore";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
@@ -144,9 +144,160 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
         e.stopImmediatePropagation();
       }
     };
+
+    // Mobile Touch Gesture Support for TMUX and Terminal Scrolling
+    // xterm.js natively ignores touch events when mouse tracking is active (areMouseEventsActive === true),
+    // which causes mobile users to be unable to scroll the terminal when attached to TMUX.
+    // By capturing touch drag events on mobile and translating them to synthetic WheelEvents,
+    // we seamlessly trigger TMUX's SGR mouse scrolling (WheelUpPane / WheelDownPane) or xterm's viewport scrolling,
+    // complete with velocity-based momentum physics.
+    let touchStartY = 0;
+    let touchStartX = 0;
+    let lastTouchY = 0;
+    let lastTouchX = 0;
+    let accumulatedDeltaY = 0;
+    let isVerticalScrolling = false;
+    let touchVelocity = 0;
+    let lastTouchTime = 0;
+    let momentumRafId: number | null = null;
+
+    const dispatchSyntheticWheel = (deltaY: number, clientX: number, clientY: number) => {
+      const target = term.element || containerRef.current;
+      if (!target) return;
+      const rect = target.getBoundingClientRect();
+      const safeX = clientX > 0 ? clientX : rect.left + rect.width / 2;
+      const safeY = clientY > 0 ? clientY : rect.top + rect.height / 2;
+
+      const wheelEvent = new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        clientX: safeX,
+        clientY: safeY,
+        deltaY,
+        deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+      });
+      target.dispatchEvent(wheelEvent);
+    };
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      if (momentumRafId !== null) {
+        cancelAnimationFrame(momentumRafId);
+        momentumRafId = null;
+      }
+      const touch = e.touches[0];
+      touchStartY = touch.clientY;
+      touchStartX = touch.clientX;
+      lastTouchY = touch.clientY;
+      lastTouchX = touch.clientX;
+      accumulatedDeltaY = 0;
+      isVerticalScrolling = false;
+      touchVelocity = 0;
+      lastTouchTime = performance.now();
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const touch = e.touches[0];
+      const deltaX = touch.clientX - touchStartX;
+      const deltaY = touch.clientY - touchStartY;
+
+      if (!isVerticalScrolling) {
+        // Detect vertical intent: moved > 6px and vertical distance dominates horizontal
+        if (Math.abs(deltaY) > 6 && Math.abs(deltaY) > Math.abs(deltaX)) {
+          isVerticalScrolling = true;
+        } else if (Math.abs(deltaX) > 8) {
+          // Horizontal swipe, let browser or tab bar handle it
+          return;
+        }
+      }
+
+      if (isVerticalScrolling) {
+        if (e.cancelable) {
+          e.preventDefault();
+        }
+
+        const currentY = touch.clientY;
+        const moveY = currentY - lastTouchY;
+        const now = performance.now();
+        const dt = now - lastTouchTime;
+        if (dt > 0) {
+          // Exponential moving average filter for touch velocity (px/ms)
+          touchVelocity = 0.7 * (moveY / dt) + 0.3 * touchVelocity;
+        }
+        lastTouchY = currentY;
+        lastTouchX = touch.clientX;
+        lastTouchTime = now;
+
+        accumulatedDeltaY += moveY;
+        const stepThreshold = 20; // 20px per terminal scroll step for smooth response
+
+        while (Math.abs(accumulatedDeltaY) >= stepThreshold) {
+          const isScrollUp = accumulatedDeltaY > 0;
+          if (isScrollUp) {
+            accumulatedDeltaY -= stepThreshold;
+          } else {
+            accumulatedDeltaY += stepThreshold;
+          }
+
+          // Dragging DOWN (moveY > 0): pulls content down -> scroll UP in history (deltaY = -100)
+          // Dragging UP (moveY < 0): pushes content up -> scroll DOWN towards prompt (deltaY = 100)
+          const wheelDelta = isScrollUp ? -100 : 100;
+          dispatchSyntheticWheel(wheelDelta, touch.clientX, touch.clientY);
+        }
+      }
+    };
+
+    const handleTouchEnd = (_e: TouchEvent) => {
+      if (!isVerticalScrolling) return;
+      isVerticalScrolling = false;
+
+      // Inertial momentum scrolling on quick flick
+      if (Math.abs(touchVelocity) > 0.35) {
+        let currentVelocity = touchVelocity;
+        const stepThreshold = 20;
+        let momentumAccum = 0;
+
+        const runMomentum = () => {
+          momentumAccum += currentVelocity * 16;
+          currentVelocity *= 0.91; // friction decay
+
+          while (Math.abs(momentumAccum) >= stepThreshold) {
+            const isScrollUp = momentumAccum > 0;
+            if (isScrollUp) {
+              momentumAccum -= stepThreshold;
+            } else {
+              momentumAccum += stepThreshold;
+            }
+            dispatchSyntheticWheel(isScrollUp ? -100 : 100, lastTouchX, lastTouchY);
+          }
+
+          if (Math.abs(currentVelocity) > 0.05) {
+            momentumRafId = requestAnimationFrame(runMomentum);
+          } else {
+            momentumRafId = null;
+          }
+        };
+
+        momentumRafId = requestAnimationFrame(runMomentum);
+      }
+    };
+
+    const handleTouchCancel = () => {
+      isVerticalScrolling = false;
+      if (momentumRafId !== null) {
+        cancelAnimationFrame(momentumRafId);
+        momentumRafId = null;
+      }
+    };
+
     if (containerEl) {
       containerEl.addEventListener("mousedown", handleMouseCapture, true);
       containerEl.addEventListener("mouseup", handleMouseCapture, true);
+      containerEl.addEventListener("touchstart", handleTouchStart, { passive: true });
+      containerEl.addEventListener("touchmove", handleTouchMove, { passive: false });
+      containerEl.addEventListener("touchend", handleTouchEnd, { passive: true });
+      containerEl.addEventListener("touchcancel", handleTouchCancel, { passive: true });
     }
 
     // Try loading WebGL hardware acceleration, fallback gracefully
@@ -224,7 +375,7 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       if (tmuxName && !session.pendingCommand) {
         useTerminalStore.getState().setPendingCommand(
           session.id,
-          `tmux set -g mouse on 2>/dev/null; tmux unbind-key -n MouseDown3Pane 2>/dev/null; tmux unbind-key -n MouseDown3Status 2>/dev/null; tmux unbind-key -n MouseDown3StatusLeft 2>/dev/null; tmux unbind-key -n M-MouseDown3Pane 2>/dev/null; tmux attach -d -t "${tmuxName}"\n`
+          TMUX_SETUP_AND_ATTACH(tmuxName)
         );
       }
 
@@ -438,9 +589,17 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
         textarea.removeEventListener("compositionupdate", handleCompositionUpdate);
         textarea.removeEventListener("compositionend", handleCompositionEnd);
       }
+      if (momentumRafId !== null) {
+        cancelAnimationFrame(momentumRafId);
+        momentumRafId = null;
+      }
       if (containerEl) {
         containerEl.removeEventListener("mousedown", handleMouseCapture, true);
         containerEl.removeEventListener("mouseup", handleMouseCapture, true);
+        containerEl.removeEventListener("touchstart", handleTouchStart);
+        containerEl.removeEventListener("touchmove", handleTouchMove);
+        containerEl.removeEventListener("touchend", handleTouchEnd);
+        containerEl.removeEventListener("touchcancel", handleTouchCancel);
       }
       resizeObserver.disconnect();
       const currentBackendId = backendSessionIdRef.current;
@@ -537,7 +696,8 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       <div className="w-full h-full bg-[#181818] px-2 pt-1 pb-1 overflow-hidden flex flex-col">
         <div
           ref={containerRef}
-          className="w-full flex-1 overflow-hidden"
+          className="w-full flex-1 overflow-hidden touch-none"
+          style={{ touchAction: "none" }}
         />
       </div>
     </div>

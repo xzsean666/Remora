@@ -8,9 +8,19 @@ name: Release Remora
         description: 'Release Tag (optional, e.g. v0.1.13. Leave blank to auto-use package.json version)'
         required: false
         default: ''
+      target:
+        description: 'Build target (all / android / desktop)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - android
+          - desktop
 
 jobs:
   build-desktop:
+    if: github.event.inputs.target != 'android'
     permissions:
       contents: write
     defaults:
@@ -118,7 +128,7 @@ jobs:
           args: ${{ matrix.args }} ${{ secrets.TAURI_SIGNING_PRIVATE_KEY == '' && '--no-sign' || '' }}
 
   build-android:
-    needs: build-desktop
+    if: github.event.inputs.target != 'desktop'
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -191,7 +201,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ needs.build-desktop.outputs.release_tag || steps.vars.outputs.tag }}
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: 'Remora ${{ steps.vars.outputs.tag }}'
           files: |
             release/android/*.apk
             release/android/SHA256SUMS.txt
