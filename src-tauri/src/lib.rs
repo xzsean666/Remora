@@ -723,12 +723,200 @@ async fn tmux_kill_session(
 async fn tmux_new_session(
     server_id: String,
     session_name: String,
+    initial_dir: Option<String>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
     let safe_name = session_name.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
-    let cmd = format!("tmux new-session -d -s \"{}\"", safe_name);
+    let mut cmd = format!("tmux new-session -d -s \"{}\"", safe_name);
+    if let Some(ref dir) = initial_dir {
+        let trimmed = dir.trim();
+        if !trimmed.is_empty() {
+            let safe_dir = trimmed.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
+            cmd.push_str(&format!(" -c \"{}\"", safe_dir));
+        }
+    }
+    cmd.push_str(" \\; set -g mouse on");
     state.connection.exec_command(&server_id, &cmd).await?;
     Ok(())
+}
+
+// --- Git Integration Commands ---
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct GitFileChange {
+    pub path: String,
+    pub status: String,
+    pub staged: bool,
+    pub raw_status: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct GitStatusResult {
+    pub is_repo: bool,
+    pub current_branch: Option<String>,
+    pub branches: Vec<String>,
+    pub changes: Vec<GitFileChange>,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+async fn git_get_status(
+    server_id: String,
+    repo_path: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<GitStatusResult> {
+    let safe_path = repo_path.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
+    let cmd = format!(
+        r#"if git -C "{path}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "===IS_REPO==="
+    git -C "{path}" branch --show-current 2>/dev/null || git -C "{path}" rev-parse --abbrev-ref HEAD 2>/dev/null
+    echo "===BRANCHES==="
+    git -C "{path}" branch --list --no-color 2>/dev/null
+    echo "===STATUS==="
+    git -C "{path}" status --porcelain=v1 -uall 2>/dev/null
+else
+    echo "===NOT_REPO==="
+fi"#,
+        path = safe_path
+    );
+
+    let output = match state.connection.exec_command(&server_id, &cmd).await {
+        Ok(out) => out,
+        Err(e) => {
+            return Ok(GitStatusResult {
+                is_repo: false,
+                current_branch: None,
+                branches: Vec::new(),
+                changes: Vec::new(),
+                error: Some(e.to_string()),
+            });
+        }
+    };
+
+    if output.contains("===NOT_REPO===") || !output.contains("===IS_REPO===") {
+        return Ok(GitStatusResult {
+            is_repo: false,
+            current_branch: None,
+            branches: Vec::new(),
+            changes: Vec::new(),
+            error: None,
+        });
+    }
+
+    let mut current_branch = None;
+    let mut branches = Vec::new();
+    let mut changes = Vec::new();
+
+    let mut section = "";
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed == "===IS_REPO===" {
+            section = "branch";
+            continue;
+        } else if trimmed == "===BRANCHES===" {
+            section = "branches";
+            continue;
+        } else if trimmed == "===STATUS===" {
+            section = "status";
+            continue;
+        }
+
+        match section {
+            "branch" => {
+                if !trimmed.is_empty() && current_branch.is_none() {
+                    current_branch = Some(trimmed.to_string());
+                }
+            }
+            "branches" => {
+                if !trimmed.is_empty() {
+                    let clean_branch = trimmed.trim_start_matches('*').trim();
+                    if !clean_branch.is_empty() && !branches.contains(&clean_branch.to_string()) {
+                        branches.push(clean_branch.to_string());
+                    }
+                }
+            }
+            "status" => {
+                if line.len() >= 4 {
+                    let raw_code = &line[0..2];
+                    let mut file_path = line[3..].trim().to_string();
+                    if let Some(pos) = file_path.find(" -> ") {
+                        file_path = file_path[pos + 4..].trim().to_string();
+                    }
+                    file_path = file_path.trim_matches('"').to_string();
+
+                    let (status_type, staged) = if raw_code == "??" {
+                        ("U".to_string(), false)
+                    } else if raw_code.starts_with('A') {
+                        ("A".to_string(), true)
+                    } else if raw_code.starts_with('D') {
+                        ("D".to_string(), true)
+                    } else if raw_code.ends_with('D') {
+                        ("D".to_string(), false)
+                    } else if raw_code.starts_with('R') {
+                        ("R".to_string(), true)
+                    } else if raw_code.starts_with('M') {
+                        ("M".to_string(), true)
+                    } else {
+                        ("M".to_string(), false)
+                    };
+
+                    changes.push(GitFileChange {
+                        path: file_path,
+                        status: status_type,
+                        staged,
+                        raw_status: raw_code.to_string(),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(GitStatusResult {
+        is_repo: true,
+        current_branch,
+        branches,
+        changes,
+        error: None,
+    })
+}
+
+#[tauri::command]
+async fn git_checkout(
+    server_id: String,
+    repo_path: String,
+    branch: String,
+    create_new: Option<bool>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<String> {
+    let safe_path = repo_path.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
+    let safe_branch = branch.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r', ' '], "");
+    let cmd = if create_new.unwrap_or(false) {
+        format!("git -C \"{}\" checkout -b \"{}\"", safe_path, safe_branch)
+    } else {
+        format!("git -C \"{}\" checkout \"{}\"", safe_path, safe_branch)
+    };
+
+    let output = state.connection.exec_command(&server_id, &cmd).await?;
+    Ok(output)
+}
+
+#[tauri::command]
+async fn git_get_diff(
+    server_id: String,
+    repo_path: String,
+    file_path: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<String> {
+    let safe_path = repo_path.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
+    let safe_file = file_path.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
+    let cmd = format!(
+        "git -C \"{}\" diff HEAD -- \"{}\" 2>&1 || git -C \"{}\" diff -- \"{}\"",
+        safe_path, safe_file, safe_path, safe_file
+    );
+
+    let output = state.connection.exec_command(&server_id, &cmd).await?;
+    Ok(output)
 }
 
 // --- Window & Lifecycle Commands ---
@@ -956,7 +1144,10 @@ pub fn run() {
             import_quick_snippets,
             tmux_list_sessions,
             tmux_kill_session,
-            tmux_new_session
+            tmux_new_session,
+            git_get_status,
+            git_checkout,
+            git_get_diff
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

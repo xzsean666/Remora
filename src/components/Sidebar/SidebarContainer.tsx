@@ -13,6 +13,7 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({ children }) 
 
   const titles: Record<string, string> = {
     explorer: "PROJECT EXPLORER",
+    git: "SOURCE CONTROL (GIT)",
     servers: "SSH SERVERS",
     snippets: "QUICK INPUTS (快捷输入)",
     transfers: "FILE TRANSFERS",

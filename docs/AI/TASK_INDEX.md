@@ -51,31 +51,31 @@
 | **TASK-040** | 根治工作区长时间闲置后断连无法查看文件夹内容、SFTP僵尸会话死锁自愈与前台恢复自动重连 | TASK-034, TASK-036 | **DONE** | `docs/AI/tasks/TASK-040.md` |
 | **TASK-041** | 移动端Tab切换终端保活、TMUX会话防退化与无感静默接入 | TASK-035, TASK-038, TASK-040 | **DONE** | `docs/AI/tasks/TASK-041.md` |
 | **TASK-042** | 编写项目官方详尽说明文档 (README.md) | TASK-000 ~ TASK-041 | **DONE** | `docs/AI/tasks/TASK-042.md` |
+| **TASK-043** | 移动端 Tab 栏胶囊溢出修复与桌面端终端状态栏重叠布局优化 (Mobile Tab Bar & Terminal Layout Optimization) | TASK-028, TASK-030, TASK-041 | **DONE** | `docs/AI/tasks/TASK-043.md` |
+| **TASK-044** | TMUX 工作路径自动继承与终端鼠标滚轮日志输出平滑滚动修复 (TMUX Working Dir Inheritance & Terminal Mouse Wheel Scroll Fix) | TASK-009, TASK-031, TASK-033, TASK-041 | **DONE** | `docs/AI/tasks/TASK-044.md` |
+| **TASK-045** | VS Code 风格轻量级 Git 可视化与分支切换管理系统 (VS Code Style Lightweight Git Visualization & Branch Management) | TASK-003, TASK-004, TASK-006, TASK-008 | **DONE** | `docs/AI/tasks/TASK-045.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 43
+- **已完成 (DONE)**: 46
 - **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 43
+- **总任务数**: 46
 
 ---
 
 ## 3. 项目执行总结
 
 - Remora 核心功能、远程代理注入、前后端集成、自动化构建发布体系全部就绪。
+- **TASK-045** 圆满完成：实现 VS Code 风格轻量级远程 Git 可视化核心体系。在 Rust 后端实现 `git_get_status`、`git_checkout`、`git_get_diff` 复合指令；在前端建立 `gitStore` 全局管理，在 ActivityBar 增加 Source Control 图标与改动数量 Badge；StatusBar 左侧集成实时分支名与改动计数，支持点击唤出分支搜索、切换与新建弹窗；侧边栏 Git 面板分类呈现修改与未跟踪文件，支持文件点击直接在编辑器打开，并提供精美 Unified Diff 差异高亮对比视窗。
+- **TASK-044** 圆满完成：TMUX 启动工作路径继承与滚轮滚动平滑日志浏览。在前端利用 OSC 动态终端标题实时解析远端 shell 当前路径并在打开 TMUX 管理器时自动带入，后端支持 `-c "<path>"` 锁定工作目录；在 TMUX 接入时注入 `set -g mouse on` 使 TMUX 接管滚轮进入 copy-mode 滚动，并在 xterm.js 拦截备用屏滚轮转译为方向键的默认行为，彻底解决在 TMUX 中运行 `agya` 等 AI CLI 时滑动滚轮变成切换历史输入词的问题。
+- **TASK-043** 圆满完成：移动端底部 Tab 栏胶囊样式优化与桌面端终端边界重叠修复。将移动端底部导航重构为圆角内嵌胶囊指示器并自适应安全区底部，移动端隐藏桌面 StatusBar 杜绝双底栏冲突；桌面端为弹性布局注入 `min-h-0` 并给 StatusBar 增加顶部阴影分割线，解耦 xterm 挂载容器与外层呼吸 padding，根除 FitAddon 计算偏差导致的终端末行文本贴边截断。
 - **TASK-042** 圆满完成：编写官方高标准 `README.md` 文档。系统化提炼 Remora 产品定位（连接 SSH → 打开远程目录 → 类似 VS Code 的远程工作区开发），横向对比传统 SSH 终端与 VS Code Remote-SSH 的差异与 0 服务端侵入优势；详尽罗列 SSH 安全认证、Project Explorer 懒加载与拖拽、CodeMirror 6 极速编辑与防丢码、Tauri 2 二进制流终端与代理注入、TMUX 独占与 Stealth Attach 无感静默接入、Android 移动端 3-Tab 保活与辅助按键等 7 大核心特性矩阵；绘制完整 ASCII 系统架构图，提供 Linux (deb/AppImage) 与 Android APK 安装指南、4 步快速上手、常用快捷键、本地源码编译与运行测试规范，为用户与开源贡献者提供一流文档体验。
 - **TASK-041** 圆满完成：根治手机端从终端切换到工作区或编辑器等其他 Tab 后 TMUX 会话丢失并回退为普通终端的严重缺陷。将移动端三板块由条件卸载重构为 CSS `hidden` 保活机制（Keep-Alive），保证后台 PTY 进程、xterm.js 与 TMUX 会话持续存活不被销毁；在前端终端 Store 中实现 `tmuxSessionName` 一等公民闭环，杜绝任何阶段退化为普通终端；实现“静默无感进入 TMUX（Stealth Attach）”流式过滤器与沉浸式遮罩，精准剥离进入 TMUX 前远端 shell 的 prompt 与 `tmux attach` 命令输入回显，实现 0 打字输入痕迹、直接呈现原生 TMUX 视窗的丝滑体验。
-- **TASK-040** 圆满完成：根治长时间离开/休眠后工作区只看到顶层文件夹且无法查看子目录内容的重大缺陷。在 Rust 后端实现 SFTP 僵尸会话死锁自动剔除与双重自愈机制（子系统通道异常自动销毁并重建会话；底层 SSH 连接断开时透明自愈重连并自动重试目录读取）；在前端 `FileTreeNode` 中解决静默吞掉子目录读取错误导致的虚假 `Empty folder` 误报，改为展示明确错误信息与一键重试；在工作区标题栏增加服务器在线/断线状态点与快捷重连横幅；在 `App.tsx` 前台唤醒（`visibilitychange`/`focus`）中增加工作区连接自愈与目录自动刷新，并在 `fileTreeStore` 中持久化记录上次工作区以平滑恢复。
-- **TASK-039** 圆满完成：优化 GitHub Actions Release 流水线，彻底移除 `workflow_dispatch` 手动输入 tag 版本的表单。在 GitHub Actions 网页端点击 `Run workflow` 时无需填写任何参数；流水线通过 `jq` / `node` / `grep` 多重安全策略自动从 `package.json` 或 `tauri.conf.json` 中读取工程既有版本号并规范化为 Release Tag（如 `v0.1.9`），实现一键零配置全自动跨平台发布。
-- **TASK-038** 圆满完成：彻底消除全局报错呈现 `[object Object]` 问题。在 Rust 后端为核心 `AppError` 实施自定义 `Serialize` 直接序列化为人类可读格式；在前端 `tauriBridge` 中实现兼具 Rust Serde Enum 单键提取、标准 Error 与通用对象降级的 `formatErrorMessage` 并由 `safeInvoke` 全面托管重抛具备友好 `message` 与 `.toString()` 的错误实例；完成 Android 移动端原生应用图标与自适应图标（`mipmap-anydpi-v26`）的全面替换，背景精准匹配 Remora 暗黑品牌色 `#181820`，并在 `build.sh` 中建立构建前自动资源同步保障，彻底根除模板旧图标与绿色机器人残留。
-- **TASK-037** 圆满完成：修复 GitHub Actions Release 跨平台流水线。补齐 Linux `libfuse2` 依赖，支持更新器私钥缺失时 `--no-sign` 自动降级，锁定 Android CI 构建版本，建立多平台统一产物归档。
-- **TASK-036** 圆满完成：彻底根除 Android 移动端进程完全划掉/Kill 退出后配置信息丢失问题。通过 Tauri 2 `app.path().app_data_dir()` 官方路径解析器将 SQLite 数据库与凭证持久化至 Android 应用专属沙盒目录（`/data/user/0/com.remora.app/files`），解决此前 `dirs::data_dir()` 在移动端返回 `None` 导致静默回退至内存数据库的严重缺陷；为 `KeyringService` 增加私有沙盒文件持久化回退，保证移动端 SSH 密码与私钥口令跨进程重启不丢失。
-- **TASK-035** 圆满完成：实现同一 TMUX 会话全局独占单终端约束。用户在 TMUX 会话列表中点击进入已存在的会话时，自动关闭该会话此前打开的旧终端并释放后端通道，防止终端堆积；终端标题优化为 `<sessionName> (tmux) [server]`，确保会话名置于最前，并在标签栏增加专属琥珀色 `Layers` 图标与宽屏自适应显示。
-- **TASK-034** 圆满完成：彻底根治终端断连后点击 Reconnect 无响应假死问题；修复 Tauri 2 Channel 销毁后重复调用导致的静默丢包缺陷；优化 Rust 后端 `open_channel` 僵尸链路 3 秒快速失败并在 `terminal_open` 中自动自愈重连 SSH；重连时就地以新 ID 干净置换死终端，彻底抹除脏 DOM 与旧缓冲区残留；持久化 TMUX 会话关联，重连后 100% 自动 re-attach 续连对应 TMUX 现场；增加 App 切回前台自动恢复自愈机制。
-- **TASK-028 ~ TASK-033**：完成移动端响应式三板块、Android CI 构建、安全区避让、TMUX 隔离与独立会话管理体系。全部 43 项任务圆满达成！
+- **TASK-000 ~ TASK-040**：基础架构、持久化、终端、编辑器、多端适配与 CI 自动发布体系全部完备。全部 46 项任务圆满达成！
+
 
 

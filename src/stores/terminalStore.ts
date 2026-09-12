@@ -15,6 +15,7 @@ export interface TerminalSession {
   pendingCommand?: string | number[];
   slotNumber?: number;
   tmuxSessionName?: string;
+  currentDir?: string;
 }
 
 interface TerminalState {
@@ -25,6 +26,7 @@ interface TerminalState {
   removeSession: (id: string) => void;
   setActiveSession: (id: string) => void;
   updateSessionStatus: (id: string, status: TerminalSession["status"]) => void;
+  updateSessionCurrentDir: (id: string, currentDir: string) => void;
   updateBackendSessionId: (id: string, backendId: string | null) => void;
   setPendingCommand: (id: string, cmd: string | number[] | null) => void;
   reconnectSession: (id: string) => void;
@@ -99,9 +101,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       serverId,
       serverName,
       initialDir,
+      currentDir: initialDir,
       remoteProxy,
       status: "connecting",
-      pendingCommand: `tmux attach -d -t "${sessionName}"\n`,
+      pendingCommand: `tmux set -g mouse on 2>/dev/null; tmux attach -d -t "${sessionName}"\n`,
       tmuxSessionName: sessionName,
       slotNumber,
     };
@@ -193,12 +196,18 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }));
   },
 
+  updateSessionCurrentDir: (id, currentDir) => {
+    set((state) => ({
+      sessions: state.sessions.map((s) => (s.id === id ? { ...s, currentDir } : s)),
+    }));
+  },
+
   updateBackendSessionId: (id, backendId) => {
     set((state) => {
       const session = state.sessions.find((s) => s.id === id);
       let pending = session?.pendingCommand;
       if (!pending && session?.tmuxSessionName) {
-        pending = `tmux attach -d -t "${session.tmuxSessionName}"\n`;
+        pending = `tmux set -g mouse on 2>/dev/null; tmux attach -d -t "${session.tmuxSessionName}"\n`;
       }
       if (backendId && pending) {
         const delay = session?.tmuxSessionName ? 50 : 120;
@@ -257,7 +266,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }
 
     const pendingCmd = tmuxName
-      ? `tmux attach -d -t "${tmuxName}"\n`
+      ? `tmux set -g mouse on 2>/dev/null; tmux attach -d -t "${tmuxName}"\n`
       : old.pendingCommand;
 
     // Clean up old backend session in background (non-blocking)

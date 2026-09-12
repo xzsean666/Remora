@@ -10,6 +10,7 @@ import { TerminalPanel } from "./components/Terminal/TerminalPanel";
 import { TransferPanel } from "./components/Sidebar/TransferManager/TransferPanel";
 import { QuickInputPanel } from "./components/Sidebar/QuickInput/QuickInputPanel";
 import { MobileTabBar } from "./components/Layout/MobileTabBar";
+import { GitPanel } from "./components/Sidebar/Git/GitPanel";
 import { useLayoutStore } from "./stores/layoutStore";
 import { useEditorStore } from "./stores/editorStore";
 import { useFileTreeStore } from "./stores/fileTreeStore";
@@ -161,6 +162,7 @@ export default function App() {
           }}
         />
       )}
+      {activeSidebarTab === "git" && <GitPanel />}
       {activeSidebarTab === "servers" && <ServerManager />}
       {activeSidebarTab === "snippets" && <QuickInputPanel />}
       {activeSidebarTab === "transfers" && <TransferPanel />}
@@ -308,7 +310,7 @@ export default function App() {
           )}
 
           {/* 3. Main Center + Bottom Panel Area */}
-          <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-vscode-bg">
+          <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-vscode-bg">
             {/* Editor Area */}
             <EditorArea />
 
@@ -336,8 +338,8 @@ export default function App() {
       {/* Mobile Navigation Tab Bar */}
       {isMobile && <MobileTabBar />}
 
-      {/* Bottom Status Bar */}
-      <StatusBar activePath={rootPath || undefined} />
+      {/* Bottom Status Bar (Desktop only to prevent duplicate bars on mobile) */}
+      {!isMobile && <StatusBar activePath={rootPath || undefined} />}
     </div>
   );
 }

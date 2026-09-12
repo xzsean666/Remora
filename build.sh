@@ -599,14 +599,14 @@ if [ -d "$BUNDLE_DIR" ]; then
   fi
 fi
 
-# 生成 SHA-256 校验和文件
+# 生成 SHA-256 校验和文件 (仅对普通文件生成，忽略子目录)
 (
   cd "${RELEASE_DIR}"
   rm -f SHA256SUMS.txt
   if command -v sha256sum &>/dev/null; then
-    sha256sum * > SHA256SUMS.txt
+    find . -maxdepth 1 -type f ! -name "SHA256SUMS.txt" -printf "%P\n" | sort | xargs -r sha256sum > SHA256SUMS.txt 2>/dev/null || true
   elif command -v shasum &>/dev/null; then
-    shasum -a 256 * > SHA256SUMS.txt
+    find . -maxdepth 1 -type f ! -name "SHA256SUMS.txt" -printf "%P\n" | sort | xargs -r shasum -a 256 > SHA256SUMS.txt 2>/dev/null || true
   fi
 )
 if [ -n "${ARCH_RELEASE_DIR:-}" ] && [ -d "${ARCH_RELEASE_DIR}" ]; then
@@ -614,9 +614,9 @@ if [ -n "${ARCH_RELEASE_DIR:-}" ] && [ -d "${ARCH_RELEASE_DIR}" ]; then
     cd "${ARCH_RELEASE_DIR}"
     rm -f SHA256SUMS.txt
     if command -v sha256sum &>/dev/null; then
-      sha256sum * > SHA256SUMS.txt
+      find . -maxdepth 1 -type f ! -name "SHA256SUMS.txt" -printf "%P\n" | sort | xargs -r sha256sum > SHA256SUMS.txt 2>/dev/null || true
     elif command -v shasum &>/dev/null; then
-      shasum -a 256 * > SHA256SUMS.txt
+      find . -maxdepth 1 -type f ! -name "SHA256SUMS.txt" -printf "%P\n" | sort | xargs -r shasum -a 256 > SHA256SUMS.txt 2>/dev/null || true
     fi
   )
 fi

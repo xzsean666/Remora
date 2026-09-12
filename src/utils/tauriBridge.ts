@@ -635,6 +635,61 @@ export async function killTmuxSession(serverId: string, sessionName: string): Pr
   await safeInvoke("tmux_kill_session", { serverId, sessionName });
 }
 
-export async function createTmuxSession(serverId: string, sessionName: string): Promise<void> {
-  await safeInvoke("tmux_new_session", { serverId, sessionName });
+export async function createTmuxSession(
+  serverId: string,
+  sessionName: string,
+  initialDir?: string
+): Promise<void> {
+  await safeInvoke("tmux_new_session", {
+    serverId,
+    sessionName,
+    initialDir: initialDir || null,
+  });
 }
+
+// --- Git Integration ---
+
+export interface GitFileChange {
+  path: string;
+  status: string;
+  staged: boolean;
+  raw_status: string;
+}
+
+export interface GitStatusResult {
+  is_repo: boolean;
+  current_branch: string | null;
+  branches: string[];
+  changes: GitFileChange[];
+  error?: string | null;
+}
+
+export async function getGitStatus(
+  serverId: string,
+  repoPath: string
+): Promise<GitStatusResult> {
+  return await safeInvoke<GitStatusResult>("git_get_status", { serverId, repoPath });
+}
+
+export async function gitCheckout(
+  serverId: string,
+  repoPath: string,
+  branch: string,
+  createNew?: boolean
+): Promise<string> {
+  return await safeInvoke<string>("git_checkout", {
+    serverId,
+    repoPath,
+    branch,
+    createNew: createNew || false,
+  });
+}
+
+export async function getGitDiff(
+  serverId: string,
+  repoPath: string,
+  filePath: string
+): Promise<string> {
+  return await safeInvoke<string>("git_get_diff", { serverId, repoPath, filePath });
+}
+

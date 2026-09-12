@@ -10,6 +10,7 @@ import {
   Clock,
   Terminal,
   Server,
+  Folder,
 } from "lucide-react";
 import {
   listTmuxSessions,
@@ -39,16 +40,21 @@ export const TmuxManagerModal: React.FC<TmuxManagerModalProps> = ({
     openTmuxSession,
     closeTmuxTerminals,
     sendDataToActiveTerminal,
+    sessions: terminalSessions,
+    activeSessionId,
   } = useTerminalStore();
   const { setTerminalOpen, setMobileTab, isMobile } = useLayoutStore();
 
   const effectiveServerId = activeServerId || currentServerId;
+  const activeTerminal = terminalSessions.find((s) => s.id === activeSessionId);
+  const detectedCwd = activeTerminal?.currentDir || activeTerminal?.initialDir || rootPath || "";
 
   const [loading, setLoading] = useState(false);
   const [installed, setInstalled] = useState(true);
   const [sessions, setSessions] = useState<TmuxSessionInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [newSessionName, setNewSessionName] = useState("");
+  const [customDir, setCustomDir] = useState(detectedCwd);
   const [isCreating, setIsCreating] = useState(false);
   const [deletingName, setDeletingName] = useState<string | null>(null);
 
@@ -77,19 +83,22 @@ export const TmuxManagerModal: React.FC<TmuxManagerModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       fetchSessions();
+      setCustomDir(detectedCwd);
     }
-  }, [isOpen, fetchSessions]);
+  }, [isOpen, fetchSessions, detectedCwd]);
 
   if (!isOpen) return null;
 
-  const handleEnterSession = (sessionName: string) => {
+  const handleEnterSession = (sessionName: string, initialDir?: string) => {
     if (!effectiveServerId) return;
+
+    const targetDir = initialDir !== undefined ? initialDir : (customDir.trim() || rootPath || undefined);
 
     openTmuxSession({
       serverId: effectiveServerId,
       serverName: connectedServerName || undefined,
       sessionName,
-      initialDir: rootPath || undefined,
+      initialDir: targetDir,
       remoteProxy: connectedServerProxy || undefined,
     });
 
@@ -107,13 +116,15 @@ export const TmuxManagerModal: React.FC<TmuxManagerModalProps> = ({
       raw ||
       `remora_${Date.now().toString(36).slice(-4)}`;
 
+    const targetDir = customDir.trim() || undefined;
+
     setIsCreating(true);
     setError(null);
     try {
-      await createTmuxSession(effectiveServerId, finalName);
+      await createTmuxSession(effectiveServerId, finalName, targetDir);
       setNewSessionName("");
       if (openImmediately) {
-        handleEnterSession(finalName);
+        handleEnterSession(finalName, targetDir);
       } else {
         await fetchSessions();
       }
@@ -259,7 +270,7 @@ export const TmuxManagerModal: React.FC<TmuxManagerModalProps> = ({
                 type="button"
                 onClick={() => handleCreateSession(true)}
                 disabled={isCreating}
-                className="px-3 py-1.5 rounded bg-amber-500 hover:bg-amber-400 text-black font-medium text-xs transition-all active:scale-95 disabled:opacity-50 flex items-center gap-1 whitespace-nowrap"
+                className="px-3 py-1.5 rounded bg-amber-500 hover:bg-amber-400 text-black font-medium text-xs transition-all active:scale-95 disabled:opacity-50 flex items-center gap-1 whitespace-nowrap cursor-pointer"
               >
                 {isCreating ? (
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -268,6 +279,29 @@ export const TmuxManagerModal: React.FC<TmuxManagerModalProps> = ({
                 )}
                 <span>新建并打开</span>
               </button>
+            </div>
+
+            {/* Working Directory Inheritance */}
+            <div className="flex items-center gap-2 text-xs text-gray-400 mt-2.5 pt-2 border-t border-[#333333]/60">
+              <Folder className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+              <span className="text-[11px] flex-shrink-0 text-gray-400">启动路径:</span>
+              <input
+                type="text"
+                value={customDir}
+                onChange={(e) => setCustomDir(e.target.value)}
+                placeholder="终端路径或留空使用家目录"
+                className="flex-1 px-2.5 py-1 bg-[#1e1e1e] border border-[#3e3e3e] focus:border-amber-500 rounded text-[11px] text-gray-200 font-mono placeholder-gray-500 outline-none"
+              />
+              {detectedCwd && customDir !== detectedCwd && (
+                <button
+                  type="button"
+                  onClick={() => setCustomDir(detectedCwd)}
+                  title="重置为当前终端路径"
+                  className="px-1.5 py-0.5 rounded hover:bg-[#333333] text-[10px] text-amber-300 underline cursor-pointer flex-shrink-0"
+                >
+                  重置
+                </button>
+              )}
             </div>
           </div>
 

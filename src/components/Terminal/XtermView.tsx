@@ -100,6 +100,26 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       return true;
     });
 
+    // Intercept wheel events in alternate buffer when mouse tracking is not active.
+    // By default, xterm synthesizes Up/Down arrow keystrokes (\x1b[A / \x1b[B), which cycles
+    // prompt history in interactive AI chat CLIs (like agya). Suppressing it preserves normal terminal UX.
+    term.attachCustomWheelEventHandler((_event: WheelEvent) => {
+      if (term.buffer.active.type === "alternate" && term.modes.mouseTrackingMode === "none") {
+        return false;
+      }
+      return true;
+    });
+
+    // Listen to shell prompt OSC title changes to track remote working directory in real-time
+    term.onTitleChange((title) => {
+      if (title) {
+        const match = title.match(/:\s*(~?\/[^\x07\x1b\r\n]*)/);
+        if (match && match[1]) {
+          useTerminalStore.getState().updateSessionCurrentDir(session.id, match[1].trim());
+        }
+      }
+    });
+
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(containerRef.current);
@@ -480,11 +500,13 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
         </div>
       )}
 
-      {/* Terminal View Container */}
-      <div
-        ref={containerRef}
-        className="w-full h-full p-2 bg-[#181818] overflow-hidden"
-      />
+      {/* Terminal View Container with safe breathing padding */}
+      <div className="w-full h-full bg-[#181818] px-2 pt-1 pb-1 overflow-hidden flex flex-col">
+        <div
+          ref={containerRef}
+          className="w-full flex-1 overflow-hidden"
+        />
+      </div>
     </div>
   );
 };

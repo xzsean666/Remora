@@ -1,8 +1,9 @@
 import React from "react";
-import { Terminal, Wifi, WifiOff, Folder, RefreshCw, AlertCircle, Code2 } from "lucide-react";
+import { Terminal, Wifi, WifiOff, Folder, RefreshCw, AlertCircle, Code2, GitBranch } from "lucide-react";
 import { useLayoutStore } from "../../stores/layoutStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useEditorStore } from "../../stores/editorStore";
+import { useGitStore } from "../../stores/gitStore";
 import { languages } from "@codemirror/language-data";
 import { LanguageDescription } from "@codemirror/language";
 
@@ -21,6 +22,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({ activePath }) => {
     getConnectedServerIds,
   } = useConnectionStore();
   const { tabs, activeTabPath } = useEditorStore();
+  const { isRepo, currentBranch, changes } = useGitStore();
   const activeTab = tabs.find((t) => t.path === activeTabPath);
   const langDesc = activeTab ? LanguageDescription.matchFilename(languages, activeTab.path) : null;
   const languageName = langDesc ? langDesc.name : (activeTab ? "Plain Text" : null);
@@ -43,7 +45,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({ activePath }) => {
 
   return (
     <footer
-      className={`h-6 text-white text-xs px-2.5 flex items-center justify-between select-none z-30 transition-colors flex-shrink-0 ${getBgClass()}`}
+      className={`h-6 text-white text-xs px-2.5 flex items-center justify-between select-none z-30 transition-colors flex-shrink-0 border-t border-black/25 shadow-xs ${getBgClass()}`}
     >
       <div className="flex items-center gap-2.5 min-w-0 flex-1 overflow-hidden mr-2">
         {/* Remote Host Badge */}
@@ -128,6 +130,23 @@ export const StatusBar: React.FC<StatusBarProps> = ({ activePath }) => {
           >
             <Folder className="w-3.5 h-3.5 opacity-80 flex-shrink-0" />
             <span className="truncate min-w-0 font-mono text-[11px]">{activePath}</span>
+          </button>
+        )}
+
+        {/* Git Branch Indicator */}
+        {isRepo && currentBranch && (
+          <button
+            onClick={() => setActiveSidebarTab("git")}
+            className="flex items-center gap-1 hover:bg-white/10 px-1.5 py-0.5 rounded cursor-pointer transition-colors text-slate-100 hover:text-white flex-shrink-0"
+            title={`Git Branch: ${currentBranch}${changes.length > 0 ? ` (${changes.length} changes)` : ""}\nClick to view Source Control`}
+          >
+            <GitBranch className="w-3.5 h-3.5 text-emerald-300 flex-shrink-0" />
+            <span className="font-mono text-[11px] font-medium">{currentBranch}</span>
+            {changes.length > 0 && (
+              <span className="text-[10px] px-1 py-0.2 rounded-full bg-black/25 text-amber-300 font-mono font-bold">
+                {changes.length}*
+              </span>
+            )}
           </button>
         )}
       </div>
