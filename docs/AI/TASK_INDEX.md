@@ -59,25 +59,29 @@
 | **TASK-048** | 跨平台多端构建体系与 GitHub Actions 手动全量发布 (Multiplatform Build System & Manual Release Workflow) | TASK-015, TASK-021, TASK-029, TASK-037, TASK-039 | **DONE** | `docs/AI/tasks/TASK-048.md` |
 | **TASK-049** | 移动端 TMUX 触控滑动手势滚屏支持与惯性动量优化 (Mobile TMUX Touch Gesture Scrolling & Momentum Physics) | TASK-009, TASK-041, TASK-044, TASK-046 | **DONE** | `docs/AI/tasks/TASK-049.md` |
 | **TASK-050** | Android Release 持久化签名 Keystore 与 GitHub Actions 自动化一致性签名升级 (Android Persistent Release Keystore & Seamless Upgrade Workflow) | TASK-048, TASK-049 | **DONE** | `docs/AI/tasks/TASK-050.md` |
+| **TASK-051** | 移动端软键盘弹出输入框遮挡自动向上避让与平滑滚动优化 (Mobile Virtual Keyboard Avoidance & Input Auto-Scroll Adjustment) | TASK-028, TASK-029, TASK-030, TASK-049, TASK-050 | **DONE** | `docs/AI/tasks/TASK-051.md` |
+| **TASK-052** | 终端聚焦/切换与 TMUX 重绘闪屏深度治理及移动端渲染管线优化 (Terminal Focus/Switch & TMUX Redraw Flicker Elimination) | TASK-009, TASK-049, TASK-051 | **DONE** | `docs/AI/tasks/TASK-052.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 51
+- **已完成 (DONE)**: 53
 - **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 51
+- **总任务数**: 53
 
 ---
 
 ## 3. 项目执行总结
 
 - Remora 核心功能、远程代理注入、前后端集成、跨平台自动化全量构建发布体系全部就绪。
+- **TASK-052** 圆满完成：终端聚焦/切换与 TMUX 重绘闪屏深度治理及移动端渲染管线优化。针对移动端在终端聚焦、调出软键盘及切换 Tab 时终端产生清屏与频闪现象，深入剖析远端 TMUX 机制与移动端 WebView 图层特性：1) 在 `XtermView` 实现尺寸变更去重引擎（缓存 `lastCols` 与 `lastRows`），比对未变动直接拦截 `terminal_resize`，彻底消除切 Tab 时 TMUX 频繁接收 `SIGWINCH` 触发的 `\x1b[H\x1b[2J` 全屏清屏重绘；并在移动端为键盘弹起动画引入 150ms 尺寸防抖；2) 移动端识别（`isMobileDevice`）后彻底禁用 `@xterm/addon-webgl`，切换至零显存开销、DOM 同层无闪烁的 xterm 5 高性能原生 DOM 渲染器；3) 将终端 Tab 容器从 `display: none` 重构为 `visibility: hidden; position: absolute; inset: 0`，保持 DOM 盒模型物理宽高，切回终端瞬时显示、0 延迟、0 尺寸突变；4) 限制 Tab 切换时的 `term.focus()` 仅在桌面端生效，防止移动端切 Tab 误唤起输入法管道；5) 在 Android 原生 `MainActivity.kt` 中为 WebView 注入 `#181818` 基础背景色，彻底根除白闪。
+- **TASK-051** 圆满完成：移动端软键盘弹出输入框遮挡自动向上避让与平滑滚动优化。解决手机端点击输入框软键盘弹出直接覆盖遮挡且必须输入字符后才调整位置的严重痛点：在 Android `MainActivity.kt` 的 `WindowInsets` 监听中添加 `WindowInsetsCompat.Type.ime()`，在 `AndroidManifest.xml` 中显式启用 `windowSoftInputMode="adjustResize"`，使得原生 WebView 在键盘弹出时物理缩容避让；在 `index.html` 中配置 `interactive-widget=resizes-content` 与自适应高度；实现全局移动端虚拟键盘自动避让引擎（`src/utils/mobileKeyboard.ts`），在输入框 `focusin` 与视口 `visualViewport` 尺寸发生变化时毫秒级平滑将目标居中（`scrollIntoView({ block: 'center' })`）；并将所有 Modal 弹窗优化为自适应最大高度与滚动放通，实现软键盘一弹起即刻平滑向上避让。
 - **TASK-050** 圆满完成：Android Release 持久化签名 Keystore 与 GitHub Actions 自动化一致性签名升级。解决每次 CI 打包动态生成 debug 证书导致手机覆盖升级报错 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` 的痛点：使用 `keytool` 生成 2048 位 RSA 官方专用证书 `remora-release.keystore`（有效期至 2054 年）；在本地 `.env` 保存签名信息并加入 `.gitignore` 严防泄露，同步提供 `.env.example` 模板；配置 `build.gradle.kts` 优先读取环境变量并自动绑定 release signingConfig；在 GitHub Actions Secrets 中通过 `gh secret set` 注入 4 项加密凭据，并在云端工作流自动解码注入环境变量，实现手机端版本升级无缝覆盖、无需卸载。
 - **TASK-049** 圆满完成：移动端 TMUX 触控滑动手势滚屏支持与惯性动量优化。针对 xterm.js 在开启鼠标追踪模式时底层直接阻断原生 touch 事件导致手机在 TMUX 下完全无法滑动的痛点，在 `XtermView` 实现移动端触控转轮映射引擎：通过 `touchstart`/`touchmove` 精准识别垂直滑动意图并拦截默认页面橡皮筋/下拉刷新；以每 20px 步进合成带坐标的 `WheelEvent`，无缝驱动 xterm.js 发送 SGR 鼠标序列给 TMUX 进入与浏览 copy-mode；结合 EMA 速度滤波与 `requestAnimationFrame` 动量衰减循环实现丝滑的物理滑行；并在 `terminalStore`、宿主机全局 `/root/.tmux.conf` 与辅助栏 `TerminalMobileBar` 中同步注入瞬间滚轮绑定与 `PgUp`/`PgDn` 快捷键。
-- **TASK-000 ~ TASK-048**：基础架构、持久化、终端、编辑器、多端适配、Git 可视化与跨平台全量构建发布体系全部完备。全部 51 项任务圆满达成！
+- **TASK-000 ~ TASK-048**：基础架构、持久化、终端、编辑器、多端适配、Git 可视化与跨平台全量构建发布体系全部完备。全部 53 项任务圆满达成！
 
 
 

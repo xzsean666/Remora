@@ -46,6 +46,11 @@ interface XtermViewProps {
 
 export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
   const { isMobile, mobileTab } = useLayoutStore();
+  const isMobileDevice =
+    isMobile ||
+    (typeof navigator !== "undefined" &&
+      (/android|iphone|ipad|ipod/i.test(navigator.userAgent) ||
+        navigator.maxTouchPoints > 1));
   const containerRef = useRef<HTMLDivElement>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -300,12 +305,22 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       containerEl.addEventListener("touchcancel", handleTouchCancel, { passive: true });
     }
 
-    // Try loading WebGL hardware acceleration, fallback gracefully
-    try {
-      const webglAddon = new WebglAddon();
-      term.loadAddon(webglAddon);
-    } catch (e) {
-      console.warn("WebGL addon unavailable, falling back to Canvas renderer:", e);
+    // Try loading WebGL hardware acceleration only on desktop.
+    // On mobile devices (Android/iOS WebView), WebGL compositor layers suffer from
+    // frame drops, buffer reallocation flickering during orientation/keyboard resize,
+    // and context loss. The built-in DOM renderer in xterm 5 is rock-solid, ultra-fast,
+    // and completely immune to mobile WebView flickering.
+    if (!isMobileDevice) {
+      try {
+        const webglAddon = new WebglAddon();
+        webglAddon.onContextLoss(() => {
+          console.warn("Terminal WebGL context lost, disposing addon gracefully...");
+          webglAddon.dispose();
+        });
+        term.loadAddon(webglAddon);
+      } catch (e) {
+        console.warn("WebGL addon unavailable, falling back to DOM renderer:", e);
+      }
     }
 
     fitAddon.fit();
@@ -553,6 +568,13 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       }
     });
 
+    // Track last sent dimensions to deduplicate terminal_resize calls.
+    // TMUX redraws the entire alternate screen buffer with clear-screen escape sequences (\x1b[H\x1b[2J)
+    // whenever it receives SIGWINCH. Deduplicating dimensions ensures TMUX never clears screen unless
+    // rows or cols actually changed.
+    let lastCols = term.cols || 80;
+    let lastRows = term.rows || 24;
+
     // Resize observer to synchronize terminal dimensions
     const resizeObserver = new ResizeObserver(() => {
       if (!containerRef.current || !fitAddonRef.current || isDisposed) return;
@@ -561,14 +583,26 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
         const currentTerm = termRef.current;
         const currentBackendId = backendSessionIdRef.current;
         if (currentTerm && currentBackendId && currentTerm.cols > 0 && currentTerm.rows > 0) {
+          // If cols and rows haven't changed, skip resize to avoid triggering TMUX full-screen redraw
+          if (currentTerm.cols === lastCols && currentTerm.rows === lastRows) {
+            return;
+          }
           if (resizeTimer) clearTimeout(resizeTimer);
+          // Debounce 150ms on mobile (to allow virtual keyboard insets animation to settle) and 80ms on desktop
+          const debounceDelay = isMobileDevice ? 150 : 80;
           resizeTimer = setTimeout(() => {
+            if (isDisposed || !backendSessionIdRef.current) return;
+            const termInstance = termRef.current;
+            if (!termInstance || termInstance.cols <= 0 || termInstance.rows <= 0) return;
+            if (termInstance.cols === lastCols && termInstance.rows === lastRows) return;
+            lastCols = termInstance.cols;
+            lastRows = termInstance.rows;
             safeInvoke("terminal_resize", {
-              sessionId: currentBackendId,
-              cols: currentTerm.cols,
-              rows: currentTerm.rows,
+              sessionId: backendSessionIdRef.current,
+              cols: termInstance.cols,
+              rows: termInstance.rows,
             }).catch(console.error);
-          }, 80);
+          }, debounceDelay);
         }
       } catch {
         // ignore layout transitions
@@ -629,19 +663,29 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       const timer = setTimeout(() => {
         try {
           fitAddonRef.current?.fit();
-          termRef.current?.focus();
+          // Auto-focus terminal on desktop for immediate keyboard input.
+          // On mobile, skip auto-focusing on tab switch to avoid popping up IME keyboard
+          // and triggering unnecessary viewport insets layout recalculations.
+          if (!isMobileDevice) {
+            termRef.current?.focus();
+          }
         } catch {
           // ignore layout timing
         }
       }, 50);
       return () => clearTimeout(timer);
     }
-  }, [isActive, isMobile, mobileTab]);
+  }, [isActive, isMobile, mobileTab, isMobileDevice]);
 
   return (
     <div
-      style={{ display: isActive ? "block" : "none" }}
-      className="w-full h-full relative overflow-hidden"
+      style={{
+        visibility: isActive ? "visible" : "hidden",
+        pointerEvents: isActive ? "auto" : "none",
+      }}
+      className={`w-full h-full absolute inset-0 overflow-hidden ${
+        isActive ? "z-10" : "z-0"
+      }`}
     >
       {/* Stealth TMUX Attaching Overlay */}
       {isAttachingTmux && session.status !== "disconnected" && (

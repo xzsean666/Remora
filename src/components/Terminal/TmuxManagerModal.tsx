@@ -178,9 +178,9 @@ export const TmuxManagerModal: React.FC<TmuxManagerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/65 backdrop-blur-xs">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/65 backdrop-blur-xs overflow-y-auto">
       <div
-        className="bg-[#1e1e1e] border border-[#3e3e3e] rounded-xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+        className="bg-[#1e1e1e] border border-[#3e3e3e] rounded-xl shadow-2xl w-full max-w-xl max-h-[min(85vh,calc(100dvh-1rem))] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

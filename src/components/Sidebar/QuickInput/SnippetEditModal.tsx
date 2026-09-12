@@ -104,8 +104,8 @@ export const SnippetEditModal: React.FC<SnippetEditModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fadeIn">
-      <div className="bg-vscode-bg border border-vscode-border rounded-lg shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto animate-fadeIn">
+      <div className="bg-vscode-bg border border-vscode-border rounded-lg shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[min(90vh,calc(100dvh-1rem))] my-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-vscode-border bg-vscode-sidebar/50 flex-shrink-0">
           <div className="flex items-center gap-2">

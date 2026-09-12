@@ -17,6 +17,7 @@ import { useFileTreeStore } from "./stores/fileTreeStore";
 import { useConnectionStore } from "./stores/connectionStore";
 import { useTerminalStore } from "./stores/terminalStore";
 import { createNewWindow, checkUpdate, installUpdate, formatErrorMessage, type UpdateInfo } from "./utils/tauriBridge";
+import { initMobileKeyboardAutoScroll } from "./utils/mobileKeyboard";
 
 export default function App() {
   const {
@@ -126,6 +127,9 @@ export default function App() {
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("focus", handleResume);
 
+    // Initialize mobile soft keyboard auto-scroll avoidance engine
+    const cleanupKeyboard = initMobileKeyboardAutoScroll();
+
     // Auto-check for updates 3s after startup
     const timer = setTimeout(() => {
       checkUpdate()
@@ -138,6 +142,7 @@ export default function App() {
     }, 3000);
 
     return () => {
+      cleanupKeyboard();
       if (unlistenConn) unlistenConn();
       if (unlistenTerm) unlistenTerm();
       window.removeEventListener("resize", handleResize);
@@ -223,7 +228,7 @@ export default function App() {
   );
 
   return (
-    <div className="flex flex-col h-[100dvh] w-screen overflow-hidden bg-vscode-bg text-vscode-text select-none">
+    <div className="flex flex-col h-full max-h-[100dvh] w-screen overflow-hidden bg-vscode-bg text-vscode-text select-none">
       {/* Update Available Notification Banner */}
       {updateInfo && (
         <div className="bg-vscode-selected px-4 py-1.5 flex items-center justify-between text-xs border-b border-vscode-border z-50 flex-shrink-0 animate-fadeIn">

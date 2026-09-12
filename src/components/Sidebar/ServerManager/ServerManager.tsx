@@ -555,10 +555,10 @@ export const ServerManager: React.FC = () => {
         )}
       </div>
 
-      {/* Add / Edit Server Modal Dialog (Fixed out-of-frame overflow) */}
+      {/* Add / Edit Server Modal Dialog (Fixed out-of-frame overflow & virtual keyboard avoidance) */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-hidden">
-          <div className="w-full max-w-lg bg-vscode-sidebar border border-vscode-border rounded-xl shadow-2xl flex flex-col max-h-[88vh] text-vscode-text overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
+          <div className="w-full max-w-lg bg-vscode-sidebar border border-vscode-border rounded-xl shadow-2xl flex flex-col max-h-[min(88vh,calc(100dvh-1rem))] text-vscode-text overflow-hidden animate-in fade-in zoom-in-95 duration-150 my-auto">
             {/* Modal Header */}
             <div className="px-5 py-3 border-b border-vscode-border/60 flex items-center justify-between flex-shrink-0">
               <h2 className="text-sm font-semibold text-vscode-textBright flex items-center gap-2">

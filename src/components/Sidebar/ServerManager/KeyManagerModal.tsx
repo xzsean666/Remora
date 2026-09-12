@@ -100,8 +100,8 @@ export const KeyManagerModal: React.FC<KeyManagerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-vscode-sidebar border border-vscode-border rounded-lg shadow-2xl w-full max-w-lg flex flex-col max-h-[85vh] overflow-hidden animate-fadeIn">
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
+      <div className="bg-vscode-sidebar border border-vscode-border rounded-lg shadow-2xl w-full max-w-lg flex flex-col max-h-[min(85vh,calc(100dvh-1rem))] overflow-hidden animate-fadeIn my-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-vscode-border bg-vscode-bg/50">
           <div className="flex items-center gap-2">

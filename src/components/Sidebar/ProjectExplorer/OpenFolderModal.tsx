@@ -288,11 +288,11 @@ export const OpenFolderModal: React.FC<OpenFolderModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 select-none"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-2 sm:p-4 select-none overflow-y-auto"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl bg-vscode-sidebar border border-vscode-border rounded-xl shadow-2xl flex flex-col max-h-[88vh] overflow-hidden text-xs"
+        className="w-full max-w-2xl bg-vscode-sidebar border border-vscode-border rounded-xl shadow-2xl flex flex-col max-h-[min(88vh,calc(100dvh-1rem))] overflow-hidden text-xs my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

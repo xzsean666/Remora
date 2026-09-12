@@ -69,11 +69,11 @@ export const BranchSwitchModal: React.FC<BranchSwitchModalProps> = ({ isOpen, on
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-16 sm:pt-24 px-4 bg-black/60 backdrop-blur-xs select-none"
+      className="fixed inset-0 z-50 flex items-start justify-center pt-8 sm:pt-24 px-2 sm:px-4 bg-black/60 backdrop-blur-xs select-none overflow-y-auto"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md bg-[#252526] border border-vscode-border rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[75vh] animate-in fade-in zoom-in-95 duration-150"
+        className="w-full max-w-md bg-[#252526] border border-vscode-border rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[min(75vh,calc(100dvh-2rem))] animate-in fade-in zoom-in-95 duration-150 my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
