@@ -756,6 +756,7 @@ pub struct GitStatusResult {
     pub current_branch: Option<String>,
     pub branches: Vec<String>,
     pub changes: Vec<GitFileChange>,
+    pub ignored: Vec<String>,
     pub error: Option<String>,
 }
 
@@ -774,6 +775,8 @@ async fn git_get_status(
     git -C "{path}" branch --list --no-color 2>/dev/null
     echo "===STATUS==="
     git -C "{path}" status --porcelain=v1 -uall 2>/dev/null
+    echo "===IGNORED==="
+    git -C "{path}" status --porcelain=v1 --ignored 2>/dev/null | grep '^!!' || true
 else
     echo "===NOT_REPO==="
 fi"#,
@@ -788,6 +791,7 @@ fi"#,
                 current_branch: None,
                 branches: Vec::new(),
                 changes: Vec::new(),
+                ignored: Vec::new(),
                 error: Some(e.to_string()),
             });
         }
@@ -799,6 +803,7 @@ fi"#,
             current_branch: None,
             branches: Vec::new(),
             changes: Vec::new(),
+            ignored: Vec::new(),
             error: None,
         });
     }
@@ -806,6 +811,7 @@ fi"#,
     let mut current_branch = None;
     let mut branches = Vec::new();
     let mut changes = Vec::new();
+    let mut ignored = Vec::new();
 
     let mut section = "";
     for line in output.lines() {
@@ -818,6 +824,9 @@ fi"#,
             continue;
         } else if trimmed == "===STATUS===" {
             section = "status";
+            continue;
+        } else if trimmed == "===IGNORED===" {
+            section = "ignored";
             continue;
         }
 
@@ -868,6 +877,15 @@ fi"#,
                     });
                 }
             }
+            "ignored" => {
+                if line.starts_with("!! ") {
+                    let mut ign_path = line[3..].trim().to_string();
+                    ign_path = ign_path.trim_matches('"').trim_end_matches('/').to_string();
+                    if !ign_path.is_empty() && !ignored.contains(&ign_path) {
+                        ignored.push(ign_path);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -877,6 +895,7 @@ fi"#,
         current_branch,
         branches,
         changes,
+        ignored,
         error: None,
     })
 }

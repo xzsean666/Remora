@@ -661,6 +661,7 @@ export interface GitStatusResult {
   current_branch: string | null;
   branches: string[];
   changes: GitFileChange[];
+  ignored: string[];
   error?: string | null;
 }
 

@@ -18,10 +18,15 @@ import {
   Trash2,
   Folder,
   AlertCircle,
+  Filter,
+  Search,
+  X,
 } from "lucide-react";
 import { useFileTreeStore, RecentProject } from "../../../stores/fileTreeStore";
 import { useConnectionStore } from "../../../stores/connectionStore";
 import { useLayoutStore } from "../../../stores/layoutStore";
+import { useGitStore } from "../../../stores/gitStore";
+import { useTerminalStore } from "../../../stores/terminalStore";
 import { FileTreeNode } from "./FileTreeNode";
 import { NewItemInput } from "./NewItemInput";
 import { ContextMenu } from "../ContextMenu";
@@ -96,12 +101,28 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
   const [connectingServerId, setConnectingServerId] = useState<string | null>(null);
   const [conflicts, setConflicts] = useState<FileConflictItem[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [filterQuery, setFilterQuery] = useState("");
+
+  // Sync Git and .gitignore status whenever workspace or active server changes
+  useEffect(() => {
+    if (rootPath) {
+      const targetServer = currentServerId || activeServerId;
+      if (targetServer) {
+        useGitStore.getState().fetchStatus(targetServer, rootPath);
+      }
+    }
+  }, [rootPath, currentServerId, activeServerId]);
 
   const handleRefresh = async () => {
     if (isRefreshing || !rootPath) return;
     setIsRefreshing(true);
     try {
       await refreshPath(rootPath);
+      const targetServer = currentServerId || activeServerId;
+      if (targetServer) {
+        await useGitStore.getState().fetchStatus(targetServer, rootPath);
+      }
     } finally {
       setIsRefreshing(false);
     }
@@ -936,6 +957,20 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? "animate-spin text-vscode-activityBarActive" : ""}`} />
           </button>
           <button
+            title={isFilterOpen ? "Close Filter / 关闭筛选" : "Filter Files / 快速筛选过滤文件"}
+            onClick={() => {
+              setIsFilterOpen((prev) => !prev);
+              if (isFilterOpen) setFilterQuery("");
+            }}
+            className={`p-1 rounded transition-colors ${
+              isFilterOpen || filterQuery
+                ? "text-vscode-activityBarActive bg-vscode-activityBarActive/15"
+                : "hover:text-white hover:bg-vscode-hover"
+            }`}
+          >
+            <Filter className="w-3.5 h-3.5" />
+          </button>
+          <button
             title="Collapse All Folders"
             onClick={collapseAll}
             className="p-1 hover:text-white hover:bg-vscode-hover rounded transition-colors"
@@ -951,6 +986,30 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
           </button>
         </div>
       </div>
+
+      {/* Explorer Quick Filter Bar */}
+      {isFilterOpen && (
+        <div className="px-2 py-1 bg-vscode-sidebar/95 border-b border-vscode-border/50 flex items-center gap-1.5 flex-shrink-0">
+          <Search className="w-3.5 h-3.5 text-vscode-textMuted flex-shrink-0" />
+          <input
+            type="text"
+            value={filterQuery}
+            onChange={(e) => setFilterQuery(e.target.value)}
+            placeholder="Filter files (过滤文件名)..."
+            className="flex-1 bg-vscode-bg border border-vscode-border rounded px-1.5 py-0.5 text-[11px] text-vscode-textBright placeholder:text-vscode-textMuted/60 focus:outline-none focus:border-vscode-activityBarActive"
+            autoFocus
+          />
+          {filterQuery && (
+            <button
+              onClick={() => setFilterQuery("")}
+              className="text-vscode-textMuted hover:text-white p-0.5 rounded transition-colors"
+              title="Clear filter"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Tree Content */}
       <div
@@ -1069,6 +1128,7 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
                 level={0}
                 onOpenFile={onOpenFile}
                 onInternalDrop={handleInternalDrop}
+                filterQuery={filterQuery}
               />
             ))}
 
@@ -1109,8 +1169,33 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
           onClose={() => setContextMenuPos(null)}
           onNewFile={() => setCreatingType("file")}
           onNewFolder={() => setCreatingType("dir")}
-          onRefresh={() => refreshPath(rootPath)}
+          onRefresh={handleRefresh}
           onCopyPath={() => navigator.clipboard.writeText(rootPath)}
+          onCopyRelativePath={() => navigator.clipboard.writeText(".")}
+          onOpenInTerminal={() => {
+            const { activeSessionId, sendDataToActiveTerminal, addSession, sessions } = useTerminalStore.getState();
+            useLayoutStore.getState().setTerminalOpen(true);
+            if (useLayoutStore.getState().isMobile) {
+              useLayoutStore.getState().setMobileTab("terminal");
+            }
+            if (activeSessionId) {
+              sendDataToActiveTerminal(`cd "${rootPath}"\n`);
+            } else if (currentServerId || activeServerId) {
+              const targetSrv = currentServerId || activeServerId!;
+              const usedSlots = new Set(sessions.map((s) => s.slotNumber).filter(Boolean));
+              let slotNumber = 1;
+              while (usedSlots.has(slotNumber)) slotNumber++;
+
+              addSession({
+                id: `term-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                title: `${slotNumber}: bash`,
+                serverId: targetSrv,
+                initialDir: rootPath,
+                status: "connecting",
+                slotNumber,
+              });
+            }
+          }}
         />
       )}
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { FilePlus, FolderPlus, Edit2, Trash2, Copy, RefreshCw, Download } from "lucide-react";
+import { FilePlus, FolderPlus, Edit2, Trash2, Copy, RefreshCw, Download, Terminal } from "lucide-react";
 
 export interface ContextMenuAction {
   label: string;
@@ -18,6 +18,8 @@ interface ContextMenuProps {
   onDelete?: () => void;
   onRefresh?: () => void;
   onCopyPath?: () => void;
+  onCopyRelativePath?: () => void;
+  onOpenInTerminal?: () => void;
   onDownload?: () => void;
   isDir: boolean;
 }
@@ -32,6 +34,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onDelete,
   onRefresh,
   onCopyPath,
+  onCopyRelativePath,
+  onOpenInTerminal,
   onDownload,
   isDir,
 }) => {
@@ -122,6 +126,32 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         >
           <Copy className="w-4 h-4 opacity-80" />
           <span>Copy Path</span>
+        </button>
+      )}
+
+      {onCopyRelativePath && (
+        <button
+          onClick={() => {
+            onCopyRelativePath();
+            onClose();
+          }}
+          className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-vscode-selected hover:text-white transition-colors text-left"
+        >
+          <Copy className="w-4 h-4 opacity-80" />
+          <span>Copy Relative Path</span>
+        </button>
+      )}
+
+      {onOpenInTerminal && (
+        <button
+          onClick={() => {
+            onOpenInTerminal();
+            onClose();
+          }}
+          className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-vscode-selected hover:text-white transition-colors text-left"
+        >
+          <Terminal className="w-4 h-4 opacity-80" />
+          <span>Open in Integrated Terminal</span>
         </button>
       )}
 

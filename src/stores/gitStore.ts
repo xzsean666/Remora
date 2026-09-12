@@ -15,6 +15,7 @@ export interface GitStatusResult {
   current_branch: string | null;
   branches: string[];
   changes: GitFileChange[];
+  ignored: string[];
   error?: string | null;
 }
 
@@ -23,6 +24,7 @@ interface GitState {
   currentBranch: string | null;
   branches: string[];
   changes: GitFileChange[];
+  ignored: string[];
   loading: boolean;
   error: string | null;
   selectedDiffFile: string | null;
@@ -30,6 +32,7 @@ interface GitState {
   diffLoading: boolean;
 
   fetchStatus: (serverId?: string, repoPath?: string) => Promise<void>;
+  isPathIgnored: (filePath: string, rootPath?: string) => boolean;
   switchBranch: (serverId: string, repoPath: string, branch: string, createNew?: boolean) => Promise<void>;
   fetchDiff: (serverId: string, repoPath: string, filePath: string) => Promise<void>;
   clearDiff: () => void;
@@ -40,11 +43,29 @@ export const useGitStore = create<GitState>((set, get) => ({
   currentBranch: null,
   branches: [],
   changes: [],
+  ignored: [],
   loading: false,
   error: null,
   selectedDiffFile: null,
   diffContent: null,
   diffLoading: false,
+
+  isPathIgnored: (filePath: string, rootPath?: string) => {
+    const state = get();
+    if (!state.isRepo) return false;
+    const base = rootPath || useFileTreeStore.getState().rootPath || "";
+    let rel = filePath;
+    if (base && filePath.startsWith(base)) {
+      rel = filePath.slice(base.length).replace(/^\/+/, "");
+    }
+    rel = rel.replace(/^\/+/, "").replace(/\/+$/, "");
+    if (!rel) return false;
+    if (rel === ".git" || rel.startsWith(".git/")) return true;
+    return state.ignored.some((ign) => {
+      const cleanIgn = ign.replace(/^\/+/, "").replace(/\/+$/, "");
+      return rel === cleanIgn || rel.startsWith(cleanIgn + "/");
+    });
+  },
 
   fetchStatus: async (overrideServerId?: string, overridePath?: string) => {
     const serverId =
@@ -54,7 +75,7 @@ export const useGitStore = create<GitState>((set, get) => ({
     const repoPath = overridePath || useFileTreeStore.getState().rootPath;
 
     if (!serverId || !repoPath) {
-      set({ isRepo: false, currentBranch: null, branches: [], changes: [], error: null });
+      set({ isRepo: false, currentBranch: null, branches: [], changes: [], ignored: [], error: null });
       return;
     }
 
@@ -70,12 +91,14 @@ export const useGitStore = create<GitState>((set, get) => ({
         currentBranch: res.current_branch,
         branches: res.branches,
         changes: res.changes,
+        ignored: res.ignored || [],
         error: res.error || null,
         loading: false,
       });
     } catch (err: any) {
       set({
         isRepo: false,
+        ignored: [],
         error: formatErrorMessage(err),
         loading: false,
       });

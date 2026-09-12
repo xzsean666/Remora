@@ -74,6 +74,8 @@ Remora 跨平台 Release 构建脚本
   --target <arch>    指定 Android 构建目标 (例如 aarch64-linux-android, 默认主流 64 位 ARM)
   --debug            构建 Debug 版本的 APK (默认构建带有内置自动签名的 Release 版 APK)
   --deb              构建并打包 Debian / Ubuntu (.deb) 安装包到 release/desktop/ (仅支持 Linux)
+  --windows          构建 Windows 桌面安装包 (nsis/msi，仅支持 Windows 环境或通过 Actions 打包)
+  --mac, --darwin    构建 macOS 桌面安装包 (dmg，仅支持 macOS 环境或通过 Actions 打包)
   --no-bundle        仅编译独立 Release 可执行二进制，跳过所有打包步骤 (默认)
   --all-bundles      尝试编译所有 Tauri 支持的本地桌面安装包
   --no-bump          不自动递增版本号 (默认每次构建自动递增 patch 修订号)
@@ -84,6 +86,8 @@ Remora 跨平台 Release 构建脚本
   ./build.sh --apk                 # 编译 Android APK，输出到 release/android/
   ./build.sh --apk --debug         # 编译带调试信息的 Debug 版 APK 到 release/android/
   ./build.sh --deb                 # 编译桌面二进制并打包 .deb 安装包到 release/desktop/
+  ./build.sh --windows             # 构建 Windows 桌面安装包 (在 Windows 环境下)
+  ./build.sh --mac                 # 构建 macOS DMG 安装包 (在 macOS 环境下)
   ./build.sh                       # 默认编译桌面 release 二进制，输出到 release/desktop/
   ./build.sh --clean               # 先清理再编译
 EOF
@@ -112,6 +116,14 @@ while [ $# -gt 0 ]; do
       ;;
     --deb)
       BUILD_MODE="deb"
+      shift
+      ;;
+    --windows)
+      BUILD_MODE="windows"
+      shift
+      ;;
+    --mac|--darwin)
+      BUILD_MODE="mac"
       shift
       ;;
     --no-bundle)
@@ -493,6 +505,31 @@ case "$BUILD_MODE" in
       log_warn "当前操作系统为 ${OS}，--deb 仅在 Linux 上生效，降级为普通 release 构建"
     else
       TAURI_ARGS+=("--bundles" "deb")
+    fi
+    ;;
+  windows)
+    if [ "$OS" != "windows" ]; then
+      log_error "Tauri 2 桌面端要求在 Windows 原生环境中打包（依赖 WebView2 运行时及 MSVC/NSIS 工具），无法在 ${RAW_OS} 宿主机进行交叉打包。"
+      echo ""
+      log_info "推荐解决方案:"
+      log_info "  1. GitHub Actions 全矩阵云打包: 进入仓库 Actions 页面手动触发 'Release Remora' 工作流，自动一键打包 deb, apk, mac (dmg), windows (exe/msi)。"
+      log_info "  2. Windows 本地打包: 在 Windows 物理机/虚拟机中打开 PowerShell 执行: .\\\\build.ps1"
+      log_info "  3. Windows Git Bash: 在 Windows Git Bash 中执行: ./build.sh --windows"
+      exit 1
+    else
+      TAURI_ARGS+=("--bundles" "nsis,msi")
+    fi
+    ;;
+  mac|darwin)
+    if [ "$OS" != "darwin" ]; then
+      log_error "Tauri 2 桌面端要求在 macOS 原生环境中打包（受 Apple SDK 专有授权及 Cocoa/WebKit 运行时约束），无法在 ${RAW_OS} 宿主机进行交叉打包。"
+      echo ""
+      log_info "推荐解决方案:"
+      log_info "  1. GitHub Actions 全矩阵云打包: 进入仓库 Actions 页面手动触发 'Release Remora' 工作流，自动一键打包 deb, apk, mac (dmg), windows (exe/msi)。"
+      log_info "  2. macOS 本地打包: 在 Mac 电脑终端中执行: ./build.sh --mac"
+      exit 1
+    else
+      TAURI_ARGS+=("--bundles" "dmg")
     fi
     ;;
   no-bundle)
