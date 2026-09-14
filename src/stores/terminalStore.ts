@@ -46,11 +46,14 @@ interface TerminalState {
 
 // Standard tmux setup command injected before attaching to any session:
 // 1. set -g mouse on: enables native scroll wheel navigation into copy-mode
-// 2. bind -n WheelUpPane / WheelDownPane: immediate smooth scroll response on first wheel/touch gesture
-// 3. unbind-key -n MouseDown3*: unbinds tmux's default ASCII context menus (Horizontal/Vertical split, Kill, etc.)
+// 2. set -s set-clipboard on & terminal-overrides Ms: pipes copied buffer into host OS clipboard via OSC 52
+// 3. bind -n WheelUpPane / WheelDownPane: immediate smooth scroll response on first wheel/touch gesture
+// 4. bind copy-mode MouseDragEnd1Pane: seamless copy-to-clipboard on mouse selection release
+// 5. unbind-key -n MouseDown3*: unbinds tmux's default ASCII context menus (Horizontal/Vertical split, Kill, etc.)
 //    so that the desktop/webview native right-click context menu (Paste/Copy) functions identically to normal terminals.
+// 6. set -s escape-time 10 & bell-action none & visual-bell off: eliminates lag and visual bell screen flashing
 export const TMUX_SETUP_AND_ATTACH = (name: string) =>
-  `tmux set -g mouse on 2>/dev/null; tmux bind -n WheelUpPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M" "if -Ft= '#{pane_in_mode}' 'send-keys -M' 'copy-mode -e; send-keys -M'" 2>/dev/null; tmux bind -n WheelDownPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M" "if -Ft= '#{pane_in_mode}' 'send-keys -M' ''" 2>/dev/null; tmux unbind-key -n MouseDown3Pane 2>/dev/null; tmux unbind-key -n MouseDown3Status 2>/dev/null; tmux unbind-key -n MouseDown3StatusLeft 2>/dev/null; tmux unbind-key -n M-MouseDown3Pane 2>/dev/null; tmux attach -d -t "${name}"\n`;
+  `tmux set -g mouse on 2>/dev/null; tmux set -s set-clipboard on 2>/dev/null; tmux set -as terminal-overrides ',*:Ms=\\E]52;%p1%s;%p2%s\\007' 2>/dev/null; tmux set -s escape-time 10 2>/dev/null; tmux set -g bell-action none 2>/dev/null; tmux set -g visual-bell off 2>/dev/null; tmux bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel 2>/dev/null; tmux bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-and-cancel 2>/dev/null; tmux bind -n WheelUpPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M" "if -Ft= '#{pane_in_mode}' 'send-keys -M' 'copy-mode -e; send-keys -M'" 2>/dev/null; tmux bind -n WheelDownPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M" "if -Ft= '#{pane_in_mode}' 'send-keys -M' ''" 2>/dev/null; tmux unbind-key -n MouseDown3Pane 2>/dev/null; tmux unbind-key -n MouseDown3Status 2>/dev/null; tmux unbind-key -n MouseDown3StatusLeft 2>/dev/null; tmux unbind-key -n M-MouseDown3Pane 2>/dev/null; tmux attach -d -t "${name}"\n`;
 
 export const useTerminalStore = create<TerminalState>((set, get) => ({
   sessions: [],

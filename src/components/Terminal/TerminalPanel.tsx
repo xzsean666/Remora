@@ -42,7 +42,7 @@ export const TerminalPanel: React.FC = () => {
   };
 
   return (
-    <div className="w-full h-full flex flex-col bg-vscode-terminal overflow-hidden select-none">
+    <div className="w-full h-full flex flex-col bg-vscode-terminal overflow-hidden">
       {/* Terminal Tab Bar */}
       <TerminalTabBar
         isQuickBarOpen={isQuickBarOpen}

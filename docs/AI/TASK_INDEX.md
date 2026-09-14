@@ -63,22 +63,24 @@
 | **TASK-052** | 终端聚焦/切换与 TMUX 重绘闪屏深度治理及移动端渲染管线优化 (Terminal Focus/Switch & TMUX Redraw Flicker Elimination) | TASK-009, TASK-049, TASK-051 | **DONE** | `docs/AI/tasks/TASK-052.md` |
 | **TASK-053** | 桌面端新窗口行为规范化 (Desktop Multi-Window VS Code Alignment & Clean Workspace) | TASK-021 | **DONE** | `docs/AI/tasks/TASK-053.md` |
 | **TASK-054** | 远程图片文件可靠预览与缩放查看能力支持 (Remote Image SFTP Binary Preview & Zoom Viewer) | TASK-004, TASK-008 | **DONE** | `docs/AI/tasks/TASK-054.md` |
+| **TASK-055** | TMUX / 普通终端鼠标划选即复制 (Copy-on-Select + OSC 52) 与终端全场景抗闪烁渲染引擎 (Atomic Coalescing & Clean DOM Renderer) | TASK-009, TASK-049, TASK-052 | **DONE** | `docs/AI/tasks/TASK-055.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 55
+- **已完成 (DONE)**: 56
 - **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 55
+- **总任务数**: 56
 
 ---
 
 ## 3. 项目执行总结
 
 - Remora 核心功能、远程代理注入、前后端集成、跨平台自动化全量构建发布体系全部就绪。
+- **TASK-055** 圆满完成：TMUX / 普通终端鼠标划选即复制 (Copy-on-Select + OSC 52) 与终端全场景抗闪烁渲染引擎（双缓冲原子帧合并 + Linux WebKitGTK DOM 渲染器优化 + RAF 尺寸防抖去重）。根据用户“粘贴可以按照以前的不，我只要现在的鼠标选中他就复制就可以了”的指示精准优化：1) 粘贴快捷键零拦截：彻底恢复 `attachCustomKeyEventHandler` 为原样（仅保留 IME 回车防护），粘贴完全由系统和浏览器原生 paste 事件触发，零权限阻断风险、100% 可靠；2) 普通终端鼠标选中即复制：在终端容器监听 `mouseup`，检测到文本选区时自动调用 `navigator.clipboard.writeText(...)` 写入本地系统剪贴板并弹出轻量 "已复制到剪贴板" Toast 浮层；3) TMUX 鼠标选中即复制：在 `terminalStore.ts` 为 TMUX 注入 `set -s set-clipboard on` 与 `terminal-overrides Ms`，将 `copy-mode` 鼠标拖拽释放直接绑定为 `copy-pipe-and-cancel`，通过 OSC 52 管道发送 Base64 选区文本，并在 `XtermView.tsx` 注册 `registerOscHandler(52)` 解码写入宿主机剪贴板与展示 Toast；4) 移除外层 `select-none`，确保原生文本选中完全畅通；5) 实现原子帧合并引擎（Atomic Frame Coalescing）：拦截并微缓冲孤立的全屏清屏包（`\x1b[H\x1b[2J`），与随后到达的重绘字符合并写入，彻底根除 TMUX 重绘时的 1 帧空白闪烁；6) 在 Linux 桌面（WebKitGTK）彻底禁用 WebGL 改用极速稳定的 xterm 5 原生 DOM 渲染器，结合 RAF 与 `proposeDimensions()` 防抖去重，彻底消除尺寸调整与分屏拖拽时的频闪；7) 注入 `escape-time 10` 与关闭 TMUX 蜂鸣闪烁。
 - **TASK-054** 圆满完成：远程图片文件可靠预览与缩放查看能力支持（对标 VS Code：SFTP 远端二进制流 Base64 管道 + 专业棋盘格图片查看器 + 滚轮缩放平移 + SVG 双模无缝切换）。解决点击远端图片文件因 UTF-8 文本强制解码抛错导致完全无法预览的重大缺陷：1) 在 Rust 后端实现 `sftp_read_binary_file` Tauri 命令与 `guess_image_mime`，通过文件扩展名与文件头魔数识别 MIME 类型，辅以 50MB 内存溢出防御保护；2) 在前端 `tauriBridge.ts`、`fileIcons.tsx`、`editorStore.ts` 建立图片检测管道，`openFile` 针对常见图片文件分支调用二进制读取并组装 Data URL；3) 编写专业图片视口查看器 `ImageViewer.tsx`，支持 CSS 棋盘网格透明通道、鼠标拖拽平移、鼠标滚轮缩放、适屏（Fit）、1:1 原始像素及实时元数据栏（自然分辨率与文件大小）；4) 针对 SVG 文件特别实现图形预览与 CodeMirror 源码编辑双模 0 延迟切换，保存时实时重新合成 Data URL，全面提升远程 Web/静态素材开发体验。
 - **TASK-053** 圆满完成：桌面端新窗口行为规范化（对标 VS Code：新窗口独立启动且默认空白工作区与会话隔离）。解决快捷键 `Ctrl+Shift+N` 或活动栏新建窗口时强制加载上一窗口项目的严重违和体验：1) 在 Rust 原生层 `open_new_window` 为 Webview 加载 URL 注入 `index.html?new_window=1` 标识参数；2) 在 `tauriBridge.ts` 结合 URL 参数与原生窗口标签（`label !== "main"`）实现精准双重辅助窗口检测；3) 在 `App.tsx` 启动初始化中识别辅助新窗口，跳过 `restoreLastWorkspace()`，默认收起底部终端面板，展现 VS Code 风格的干净欢迎界面与项目连接列表；4) 在 `fileTreeStore.ts` 中联动 `setAppWindowTitle` 实现系统窗口标题随项目名称动态更新（`[项目名] - Remora` 或 `Remora`），彻底实现桌面多窗口独立并行。
 - **TASK-052** 圆满完成：终端聚焦/切换与 TMUX 重绘闪屏深度治理及移动端渲染管线优化。针对移动端在终端聚焦、调出软键盘及切换 Tab 时终端产生清屏与频闪现象，深入剖析远端 TMUX 机制与移动端 WebView 图层特性：1) 在 `XtermView` 实现尺寸变更去重引擎（缓存 `lastCols` 与 `lastRows`），比对未变动直接拦截 `terminal_resize`，彻底消除切 Tab 时 TMUX 频繁接收 `SIGWINCH` 触发的 `\x1b[H\x1b[2J` 全屏清屏重绘；并在移动端为键盘弹起动画引入 150ms 尺寸防抖；2) 移动端识别（`isMobileDevice`）后彻底禁用 `@xterm/addon-webgl`，切换至零显存开销、DOM 同层无闪烁的 xterm 5 高性能原生 DOM 渲染器；3) 将终端 Tab 容器从 `display: none` 重构为 `visibility: hidden; position: absolute; inset: 0`，保持 DOM 盒模型物理宽高，切回终端瞬时显示、0 延迟、0 尺寸突变；4) 限制 Tab 切换时的 `term.focus()` 仅在桌面端生效，防止移动端切 Tab 误唤起输入法管道；5) 在 Android 原生 `MainActivity.kt` 中为 WebView 注入 `#181818` 基础背景色，彻底根除白闪。

@@ -3,7 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Channel } from "@tauri-apps/api/core";
-import { RotateCcw, RefreshCw, X } from "lucide-react";
+import { RotateCcw, RefreshCw, X, Copy as CopyIcon } from "lucide-react";
 import { safeInvoke, formatErrorMessage } from "../../utils/tauriBridge";
 import { TerminalSession, useTerminalStore, TMUX_SETUP_AND_ATTACH } from "../../stores/terminalStore";
 import { useConnectionStore } from "../../stores/connectionStore";
@@ -39,6 +39,41 @@ function findTmuxStartMarker(data: Uint8Array): number {
   return -1;
 }
 
+/**
+ * Detects whether a data chunk contains full-screen erase / clear screen escape sequences:
+ * \x1b[2J, \x1b[3J, or \x1b[?1049h.
+ * Used by the Atomic Frame Coalescing engine to prevent 1-frame blank flashes during TMUX redraws.
+ */
+function hasClearScreenMarker(data: Uint8Array): boolean {
+  if (data.length < 4) return false;
+  for (let i = 0; i <= data.length - 4; i++) {
+    // Check for \x1b[2J (0x1b, 0x5b, 0x32, 0x4a) or \x1b[3J
+    if (
+      data[i] === 0x1b &&
+      data[i + 1] === 0x5b &&
+      (data[i + 2] === 0x32 || data[i + 2] === 0x33) &&
+      data[i + 3] === 0x4a
+    ) {
+      return true;
+    }
+    // Check for \x1b[?1049h (switch to alternate screen, clears buffer)
+    if (
+      i <= data.length - 8 &&
+      data[i] === 0x1b &&
+      data[i + 1] === 0x5b &&
+      data[i + 2] === 0x3f &&
+      data[i + 3] === 0x31 &&
+      data[i + 4] === 0x30 &&
+      data[i + 5] === 0x34 &&
+      data[i + 6] === 0x39 &&
+      data[i + 7] === 0x68
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 interface XtermViewProps {
   session: TerminalSession;
   isActive: boolean;
@@ -63,6 +98,19 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
   const [isAttachingTmux, setIsAttachingTmux] = useState(isTmuxSession);
   const isAttachingTmuxRef = useRef(isTmuxSession);
   const tmuxPreambleBufferRef = useRef<Uint8Array[]>([]);
+
+  // Feedback toast for automatic copy-on-select / TMUX copy
+  const [copyToast, setCopyToast] = useState(false);
+  const copyToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const triggerCopyFeedback = () => {
+    if (copyToastTimerRef.current) clearTimeout(copyToastTimerRef.current);
+    setCopyToast(true);
+    copyToastTimerRef.current = setTimeout(() => {
+      setCopyToast(false);
+      copyToastTimerRef.current = null;
+    }, 1200);
+  };
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -102,6 +150,35 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
     term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
       if (event.isComposing && (event.key === "Enter" || event.keyCode === 13)) {
         return false;
+      }
+      return true;
+    });
+
+    // Register OSC 52 clipboard escape sequence handler
+    // Format: \x1b]52;<selection>;<base64-payload>\x07 (or \x1b\\)
+    // Allows remote TMUX (set-clipboard on) or remote CLI tools to copy directly into the local system clipboard!
+    const osc52Disposable = term.parser.registerOscHandler(52, (data: string) => {
+      const firstSemicolon = data.indexOf(";");
+      if (firstSemicolon === -1) return true;
+      const base64Payload = data.slice(firstSemicolon + 1);
+      if (!base64Payload || base64Payload === "?") return true;
+
+      try {
+        const binary = atob(base64Payload);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        const decodedText = new TextDecoder().decode(bytes);
+        if (decodedText) {
+          navigator.clipboard.writeText(decodedText).then(() => {
+            triggerCopyFeedback();
+          }).catch((err) => {
+            console.warn("Failed to write OSC 52 text to clipboard:", err);
+          });
+        }
+      } catch (e) {
+        console.warn("Error parsing OSC 52 payload:", e);
       }
       return true;
     });
@@ -148,6 +225,21 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       if (e.button === 2) {
         e.stopImmediatePropagation();
       }
+    };
+
+    // Copy-on-Select: When user drags and selects text with the mouse, automatically copy it on mouseup
+    const handleMouseUp = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      setTimeout(() => {
+        if (term.hasSelection()) {
+          const selection = term.getSelection();
+          if (selection && selection.length > 0) {
+            navigator.clipboard.writeText(selection).then(() => {
+              triggerCopyFeedback();
+            }).catch(() => {});
+          }
+        }
+      }, 20);
     };
 
     // Mobile Touch Gesture Support for TMUX and Terminal Scrolling
@@ -299,18 +391,24 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
     if (containerEl) {
       containerEl.addEventListener("mousedown", handleMouseCapture, true);
       containerEl.addEventListener("mouseup", handleMouseCapture, true);
+      containerEl.addEventListener("mouseup", handleMouseUp);
       containerEl.addEventListener("touchstart", handleTouchStart, { passive: true });
       containerEl.addEventListener("touchmove", handleTouchMove, { passive: false });
       containerEl.addEventListener("touchend", handleTouchEnd, { passive: true });
       containerEl.addEventListener("touchcancel", handleTouchCancel, { passive: true });
     }
 
-    // Try loading WebGL hardware acceleration only on desktop.
-    // On mobile devices (Android/iOS WebView), WebGL compositor layers suffer from
-    // frame drops, buffer reallocation flickering during orientation/keyboard resize,
-    // and context loss. The built-in DOM renderer in xterm 5 is rock-solid, ultra-fast,
-    // and completely immune to mobile WebView flickering.
-    if (!isMobileDevice) {
+    const isLinuxDesktop =
+      typeof navigator !== "undefined" &&
+      /linux/i.test(navigator.userAgent) &&
+      !/android/i.test(navigator.userAgent);
+
+    // Load WebGL hardware acceleration only on non-Linux desktop.
+    // On Linux (Tauri WebKitGTK) and Mobile (Android/iOS WebView), WebGL canvas compositor layers suffer from
+    // frame drops, buffer reallocation blanking during orientation/keyboard/splitter resize,
+    // and context loss. The built-in DOM renderer in xterm 5 is rock-solid, ultra-fast, zero-memory-leak,
+    // and completely immune to WebView canvas flickering.
+    if (!isMobileDevice && !isLinuxDesktop) {
       try {
         const webglAddon = new WebglAddon();
         webglAddon.onContextLoss(() => {
@@ -373,6 +471,29 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
     }
 
     let tmuxSafetyTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    // Double-buffering queue to coalesce full-screen clear sequences with subsequent redraw data
+    let pendingClearBuffer: Uint8Array[] = [];
+    let clearCoalesceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const flushPendingClearBuffer = () => {
+      if (clearCoalesceTimer) {
+        clearTimeout(clearCoalesceTimer);
+        clearCoalesceTimer = null;
+      }
+      if (pendingClearBuffer.length > 0 && termRef.current) {
+        let totalLen = 0;
+        for (const buf of pendingClearBuffer) totalLen += buf.length;
+        const combined = new Uint8Array(totalLen);
+        let offset = 0;
+        for (const buf of pendingClearBuffer) {
+          combined.set(buf, offset);
+          offset += buf.length;
+        }
+        pendingClearBuffer = [];
+        termRef.current.write(combined);
+      }
+    };
 
     const startSession = async () => {
       if (isDisposed) return;
@@ -445,6 +566,25 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
             tmuxPreambleBufferRef.current.push(data);
             return;
           }
+        }
+
+        // Atomic Frame Coalescing:
+        // When a small chunk containing full-screen clear sequences arrives (e.g. TMUX full redraw),
+        // hold it for up to 10ms to coalesce with the immediately following text redraw packet,
+        // preventing the terminal from briefly rendering a blank empty screen (eliminating screen flash).
+        if (hasClearScreenMarker(data) && data.length < 512) {
+          flushPendingClearBuffer();
+          pendingClearBuffer.push(data);
+          clearCoalesceTimer = setTimeout(() => {
+            flushPendingClearBuffer();
+          }, 10);
+          return;
+        }
+
+        if (pendingClearBuffer.length > 0) {
+          pendingClearBuffer.push(data);
+          flushPendingClearBuffer();
+          return;
         }
 
         term.write(data);
@@ -575,49 +715,69 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
     let lastCols = term.cols || 80;
     let lastRows = term.rows || 24;
 
-    // Resize observer to synchronize terminal dimensions
+    // Resize observer to synchronize terminal dimensions with RAF coalescing
+    let resizeRafId: number | null = null;
     const resizeObserver = new ResizeObserver(() => {
       if (!containerRef.current || !fitAddonRef.current || isDisposed) return;
-      try {
-        fitAddonRef.current.fit();
-        const currentTerm = termRef.current;
-        const currentBackendId = backendSessionIdRef.current;
-        if (currentTerm && currentBackendId && currentTerm.cols > 0 && currentTerm.rows > 0) {
-          // If cols and rows haven't changed, skip resize to avoid triggering TMUX full-screen redraw
-          if (currentTerm.cols === lastCols && currentTerm.rows === lastRows) {
+      const container = containerRef.current;
+      if (container.clientWidth <= 0 || container.clientHeight <= 0) return;
+
+      if (resizeRafId !== null) cancelAnimationFrame(resizeRafId);
+      resizeRafId = requestAnimationFrame(() => {
+        resizeRafId = null;
+        if (isDisposed || !fitAddonRef.current || !containerRef.current) return;
+        try {
+          const proposed = fitAddonRef.current.proposeDimensions();
+          if (!proposed || proposed.cols <= 0 || proposed.rows <= 0) return;
+
+          // If calculated dimensions match current dimensions, skip fit() to avoid redundant layout reflows
+          if (proposed.cols === lastCols && proposed.rows === lastRows) {
             return;
           }
-          if (resizeTimer) clearTimeout(resizeTimer);
-          // Debounce 150ms on mobile (to allow virtual keyboard insets animation to settle) and 80ms on desktop
-          const debounceDelay = isMobileDevice ? 150 : 80;
-          resizeTimer = setTimeout(() => {
-            if (isDisposed || !backendSessionIdRef.current) return;
-            const termInstance = termRef.current;
-            if (!termInstance || termInstance.cols <= 0 || termInstance.rows <= 0) return;
-            if (termInstance.cols === lastCols && termInstance.rows === lastRows) return;
-            lastCols = termInstance.cols;
-            lastRows = termInstance.rows;
-            safeInvoke("terminal_resize", {
-              sessionId: backendSessionIdRef.current,
-              cols: termInstance.cols,
-              rows: termInstance.rows,
-            }).catch(console.error);
-          }, debounceDelay);
+
+          fitAddonRef.current.fit();
+          const currentTerm = termRef.current;
+          const currentBackendId = backendSessionIdRef.current;
+          if (currentTerm && currentBackendId && currentTerm.cols > 0 && currentTerm.rows > 0) {
+            if (currentTerm.cols === lastCols && currentTerm.rows === lastRows) {
+              return;
+            }
+            if (resizeTimer) clearTimeout(resizeTimer);
+            // Debounce 150ms on mobile (to allow virtual keyboard insets animation to settle) and 80ms on desktop
+            const debounceDelay = isMobileDevice ? 150 : 80;
+            resizeTimer = setTimeout(() => {
+              if (isDisposed || !backendSessionIdRef.current) return;
+              const termInstance = termRef.current;
+              if (!termInstance || termInstance.cols <= 0 || termInstance.rows <= 0) return;
+              if (termInstance.cols === lastCols && termInstance.rows === lastRows) return;
+              lastCols = termInstance.cols;
+              lastRows = termInstance.rows;
+              safeInvoke("terminal_resize", {
+                sessionId: backendSessionIdRef.current,
+                cols: termInstance.cols,
+                rows: termInstance.rows,
+              }).catch(console.error);
+            }, debounceDelay);
+          }
+        } catch {
+          // ignore layout transitions
         }
-      } catch {
-        // ignore layout transitions
-      }
+      });
     });
 
     resizeObserver.observe(containerRef.current);
 
     return () => {
       isDisposed = true;
+      if (resizeRafId !== null) cancelAnimationFrame(resizeRafId);
       if (resizeTimer) clearTimeout(resizeTimer);
       if (textareaClearTimer) clearTimeout(textareaClearTimer);
       if (connectTimeout) clearTimeout(connectTimeout);
       if (tmuxSafetyTimeout) clearTimeout(tmuxSafetyTimeout);
       if (refreshDebounceTimer) clearTimeout(refreshDebounceTimer);
+      if (copyToastTimerRef.current) clearTimeout(copyToastTimerRef.current);
+      flushPendingClearBuffer();
+      osc52Disposable.dispose();
       if (textarea) {
         textarea.removeEventListener("compositionstart", handleCompositionStart);
         textarea.removeEventListener("compositionupdate", handleCompositionUpdate);
@@ -630,6 +790,7 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
       if (containerEl) {
         containerEl.removeEventListener("mousedown", handleMouseCapture, true);
         containerEl.removeEventListener("mouseup", handleMouseCapture, true);
+        containerEl.removeEventListener("mouseup", handleMouseUp);
         containerEl.removeEventListener("touchstart", handleTouchStart);
         containerEl.removeEventListener("touchmove", handleTouchMove);
         containerEl.removeEventListener("touchend", handleTouchEnd);
@@ -659,10 +820,18 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
   // Fit and focus when switching to active tab or switching back to mobile terminal
   useEffect(() => {
     const isVisible = isActive && (!isMobile || mobileTab === "terminal");
-    if (isVisible && fitAddonRef.current && termRef.current) {
+    if (isVisible && fitAddonRef.current && termRef.current && containerRef.current) {
+      const container = containerRef.current;
+      if (container.clientWidth <= 0 || container.clientHeight <= 0) return;
+
       const timer = setTimeout(() => {
         try {
-          fitAddonRef.current?.fit();
+          const proposed = fitAddonRef.current?.proposeDimensions();
+          if (proposed && proposed.cols > 0 && proposed.rows > 0) {
+            if (proposed.cols !== termRef.current?.cols || proposed.rows !== termRef.current?.rows) {
+              fitAddonRef.current?.fit();
+            }
+          }
           // Auto-focus terminal on desktop for immediate keyboard input.
           // On mobile, skip auto-focusing on tab switch to avoid popping up IME keyboard
           // and triggering unnecessary viewport insets layout recalculations.
@@ -672,7 +841,7 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
         } catch {
           // ignore layout timing
         }
-      }, 50);
+      }, 30);
       return () => clearTimeout(timer);
     }
   }, [isActive, isMobile, mobileTab, isMobileDevice]);
@@ -735,6 +904,16 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
           </span>
         </div>
       )}
+
+      {/* Quick Copy Feedback Toast */}
+      {copyToast && (
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-950/90 border border-emerald-500/50 text-emerald-200 text-xs shadow-xl backdrop-blur-md select-none animate-in fade-in zoom-in-95 duration-100">
+          <CopyIcon className="w-3.5 h-3.5 text-emerald-400" />
+          <span className="font-mono text-[11px] font-medium">已复制到剪贴板</span>
+        </div>
+      )}
+
+
 
       {/* Terminal View Container with safe breathing padding */}
       <div className="w-full h-full bg-[#181818] px-2 pt-1 pb-1 overflow-hidden flex flex-col">

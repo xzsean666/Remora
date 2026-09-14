@@ -1,6 +1,6 @@
 [package]
 name = "remora"
-version = "0.1.14"
+version = "0.1.17"
 description = "Lightweight SSH Remote Workspace Desktop Client"
 authors = ["Remora Team"]
 edition = "2021"
