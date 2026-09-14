@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { safeInvoke as invoke, formatErrorMessage } from "../utils/tauriBridge";
+import { safeInvoke as invoke, formatErrorMessage, setAppWindowTitle } from "../utils/tauriBridge";
 import { useConnectionStore } from "./connectionStore";
 
 export interface FileEntry {
@@ -119,6 +119,8 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       dirErrors: {},
     }));
 
+    setAppWindowTitle(`${projectName} - Remora`);
+
     try {
       localStorage.setItem("remora_last_workspace_server", serverId);
       localStorage.setItem("remora_last_workspace_path", cleanPath);
@@ -149,6 +151,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
 
   switchServer: async (serverId: string | null) => {
     if (!serverId) {
+      setAppWindowTitle("Remora");
       set({
         currentServerId: null,
         rootPath: null,
@@ -165,6 +168,8 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     const existingRoot = serverRoots[serverId];
 
     if (existingRoot) {
+      const projectName = existingRoot.split("/").filter(Boolean).pop() || existingRoot;
+      setAppWindowTitle(`${projectName} - Remora`);
       set({
         currentServerId: serverId,
         rootPath: existingRoot,
@@ -176,6 +181,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       });
       await get().loadDirectory(existingRoot);
     } else {
+      setAppWindowTitle("Remora");
       set({
         currentServerId: serverId,
         rootPath: null,
@@ -199,6 +205,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       localStorage.removeItem("remora_last_workspace_path");
       localStorage.removeItem("remora_last_workspace_name");
     } catch {}
+    setAppWindowTitle("Remora");
     set({
       rootPath: null,
       serverRoots: updatedRoots,

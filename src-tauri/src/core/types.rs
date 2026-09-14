@@ -89,6 +89,14 @@ pub struct ReadFileResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReadBinaryFileResult {
+    pub data_base64: String,
+    pub mime_type: String,
+    pub size: u64,
+    pub mtime: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WriteFileResult {
     pub success: bool,
     pub new_mtime: u64,

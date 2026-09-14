@@ -16,7 +16,15 @@ import { useEditorStore } from "./stores/editorStore";
 import { useFileTreeStore } from "./stores/fileTreeStore";
 import { useConnectionStore } from "./stores/connectionStore";
 import { useTerminalStore } from "./stores/terminalStore";
-import { createNewWindow, checkUpdate, installUpdate, formatErrorMessage, type UpdateInfo } from "./utils/tauriBridge";
+import {
+  createNewWindow,
+  checkUpdate,
+  installUpdate,
+  formatErrorMessage,
+  isAuxiliaryWindowAsync,
+  setAppWindowTitle,
+  type UpdateInfo,
+} from "./utils/tauriBridge";
 import { initMobileKeyboardAutoScroll } from "./utils/mobileKeyboard";
 
 export default function App() {
@@ -47,9 +55,21 @@ export default function App() {
   const [manualCheckMsg, setManualCheckMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    initFromPreferences();
     loadRecentProjects();
-    useFileTreeStore.getState().restoreLastWorkspace();
+
+    const setupWindowAndWorkspace = async () => {
+      await initFromPreferences();
+      const isAuxiliary = await isAuxiliaryWindowAsync();
+      if (!isAuxiliary) {
+        await useFileTreeStore.getState().restoreLastWorkspace();
+      } else {
+        console.info("[Remora] Auxiliary / New window detected: initializing clean empty workspace (VS Code style).");
+        // In a new empty window, collapse terminal panel by default to show clean empty welcome editor
+        useLayoutStore.getState().setTerminalOpen(false);
+        setAppWindowTitle("Remora");
+      }
+    };
+    setupWindowAndWorkspace();
 
     const handleResize = () => {
       const mobile = window.innerWidth < 768;

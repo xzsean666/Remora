@@ -1,5 +1,10 @@
 import { create } from "zustand";
-import { safeInvoke as invoke, formatErrorMessage } from "../utils/tauriBridge";
+import {
+  safeInvoke as invoke,
+  formatErrorMessage,
+  isImageFilePath,
+  type ReadBinaryFileResponse,
+} from "../utils/tauriBridge";
 
 export interface EditorTab {
   serverId: string;
@@ -11,6 +16,12 @@ export interface EditorTab {
   isDirty: boolean;
   isPreview: boolean;
   cursor?: { line: number; ch: number };
+  fileType?: "text" | "image";
+  imageDataUrl?: string;
+  mimeType?: string;
+  fileSize?: number;
+  svgSource?: string;
+  viewMode?: "preview" | "source";
 }
 
 export interface ConflictInfo {
@@ -44,6 +55,7 @@ interface EditorState {
   setActiveTab: (path: string) => void;
   pinTab: (path: string) => void;
   updateContent: (path: string, content: string) => void;
+  toggleSvgViewMode: (path: string) => void;
   saveActiveFile: () => Promise<boolean>;
   saveFile: (path: string, forceOverwrite?: boolean) => Promise<boolean>;
   resolveConflict: (action: "overwrite" | "reload" | "cancel") => Promise<void>;
@@ -74,22 +86,61 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     set({ loading: true });
     try {
-      const res = await invoke<ReadFileResponse>("sftp_read_file", {
-        serverId,
-        path,
-      });
-
+      const isImg = isImageFilePath(path);
       const fileName = path.split("/").filter(Boolean).pop() || path;
-      const newTab: EditorTab = {
-        serverId,
-        path,
-        name: fileName,
-        content: res.content,
-        savedContent: res.content,
-        mtime: res.mtime,
-        isDirty: false,
-        isPreview,
-      };
+      let newTab: EditorTab;
+
+      if (isImg) {
+        const res = await invoke<ReadBinaryFileResponse>("sftp_read_binary_file", {
+          serverId,
+          path,
+        });
+        const dataUrl = `data:${res.mime_type};base64,${res.data_base64}`;
+        let svgSource: string | undefined;
+        if (res.mime_type.includes("svg") || path.toLowerCase().endsWith(".svg")) {
+          try {
+            const binString = atob(res.data_base64);
+            const bytes = Uint8Array.from(binString, (m) => m.charCodeAt(0));
+            svgSource = new TextDecoder().decode(bytes);
+          } catch {
+            svgSource = undefined;
+          }
+        }
+
+        newTab = {
+          serverId,
+          path,
+          name: fileName,
+          content: svgSource || "",
+          savedContent: svgSource || "",
+          mtime: res.mtime,
+          isDirty: false,
+          isPreview,
+          fileType: "image",
+          imageDataUrl: dataUrl,
+          mimeType: res.mime_type,
+          fileSize: res.size,
+          svgSource,
+          viewMode: "preview",
+        };
+      } else {
+        const res = await invoke<ReadFileResponse>("sftp_read_file", {
+          serverId,
+          path,
+        });
+
+        newTab = {
+          serverId,
+          path,
+          name: fileName,
+          content: res.content,
+          savedContent: res.content,
+          mtime: res.mtime,
+          isDirty: false,
+          isPreview,
+          fileType: "text",
+        };
+      }
 
       const currentTabs = get().tabs;
       let newTabs: EditorTab[];
@@ -116,6 +167,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       console.error("Failed to read file via SFTP:", err);
       set({ loading: false });
     }
+  },
+
+  toggleSvgViewMode: (path: string) => {
+    const { tabs } = get();
+    const idx = tabs.findIndex((t) => t.path === path);
+    if (idx === -1) return;
+    const tab = tabs[idx];
+    const newMode = tab.viewMode === "source" ? "preview" : "source";
+    const updatedTabs = [...tabs];
+    updatedTabs[idx] = { ...tab, viewMode: newMode };
+    set({ tabs: updatedTabs });
   },
 
   closeTab: (path: string) => {
@@ -201,16 +263,28 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
       if (res.success) {
         set((state) => ({
-          tabs: state.tabs.map((t) =>
-            t.path === path
-              ? {
-                  ...t,
-                  savedContent: t.content,
-                  mtime: res.new_mtime,
-                  isDirty: false,
+          tabs: state.tabs.map((t) => {
+            if (t.path !== path) return t;
+            let updatedImageDataUrl = t.imageDataUrl;
+            if (t.fileType === "image" && t.mimeType?.includes("svg")) {
+              try {
+                const bytes = new TextEncoder().encode(t.content);
+                let binStr = "";
+                for (let i = 0; i < bytes.length; i++) {
+                  binStr += String.fromCharCode(bytes[i]);
                 }
-              : t
-          ),
+                updatedImageDataUrl = `data:image/svg+xml;base64,${btoa(binStr)}`;
+              } catch {}
+            }
+            return {
+              ...t,
+              savedContent: t.content,
+              imageDataUrl: updatedImageDataUrl,
+              svgSource: t.content,
+              mtime: res.new_mtime,
+              isDirty: false,
+            };
+          }),
           conflictInfo: null,
         }));
         return true;

@@ -3,11 +3,12 @@ import { useEditorStore } from "../../stores/editorStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { EditorTabBar } from "./EditorTabBar";
 import { CodeEditor } from "./CodeEditor";
+import { ImageViewer } from "./ImageViewer";
 import { ConflictModal } from "./ConflictModal";
 import { Code2, Loader2, Sparkles, AlertTriangle, RefreshCw } from "lucide-react";
 
 export const EditorArea: React.FC = () => {
-  const { tabs, activeTabPath, loading } = useEditorStore();
+  const { tabs, activeTabPath, loading, toggleSvgViewMode } = useEditorStore();
   const { status, reconnectAttempt, reconnect } = useConnectionStore();
   const activeTab = tabs.find((t) => t.path === activeTabPath);
 
@@ -50,7 +51,26 @@ export const EditorArea: React.FC = () => {
       {/* Editor Content or Empty Welcome Screen */}
       <div className="flex-1 min-h-0 min-w-0 relative overflow-hidden bg-vscode-bg">
         {activeTab ? (
-          <CodeEditor key={activeTab.path} tab={activeTab} />
+          activeTab.fileType === "image" && activeTab.viewMode !== "source" ? (
+            <ImageViewer key={activeTab.path} tab={activeTab} />
+          ) : (
+            <div className="w-full h-full flex flex-col relative">
+              {activeTab.fileType === "image" && activeTab.viewMode === "source" && (
+                <div className="px-3 py-1 bg-vscode-sidebar/90 border-b border-vscode-border/80 flex items-center justify-between text-xs text-vscode-textMuted flex-shrink-0">
+                  <span className="text-[11px]">Editing SVG Source Code</span>
+                  <button
+                    onClick={() => toggleSvgViewMode(activeTab.path)}
+                    className="px-2 py-0.5 rounded bg-vscode-activityBarActive text-white text-[11px] hover:bg-vscode-activityBarActive/90 transition-colors font-medium shadow-xs"
+                  >
+                    View Preview
+                  </button>
+                </div>
+              )}
+              <div className="flex-1 min-h-0 relative">
+                <CodeEditor key={activeTab.path} tab={activeTab} />
+              </div>
+            </div>
+          )
         ) : (
           <div className="h-full flex flex-col items-center justify-center p-6 text-center select-none overflow-y-auto min-h-0">
             <div className="max-w-md p-8 border border-vscode-border/50 rounded-2xl bg-vscode-sidebar/30 backdrop-blur-sm flex flex-col items-center my-auto flex-shrink-0">

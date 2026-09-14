@@ -91,7 +91,7 @@ export const EditorTabBar: React.FC = () => {
         })}
       </div>
 
-      {activeTab && (
+      {activeTab && (activeTab.fileType !== "image" || activeTab.viewMode === "source") && (
         <div className="flex items-center px-2 flex-shrink-0 gap-1 border-l border-vscode-border/40">
           <button
             onClick={handleSave}

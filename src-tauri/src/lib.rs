@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tauri::{Emitter, Manager, State};
 use crate::connection::{ConnectionManager, ConnectionState};
 use crate::core::{
-    AppError, AuthType, FileEntry, LayoutPreferences, QuickSnippet, ReadFileResult, RecentProject, Result,
+    AppError, AuthType, FileEntry, LayoutPreferences, QuickSnippet, ReadBinaryFileResult, ReadFileResult, RecentProject, Result,
     ServerConfig, SshKey, WriteFileResult,
 };
 use crate::security::KeyringService;
@@ -324,6 +324,31 @@ async fn sftp_read_file(
             state.sftp.close_session(&server_id).await;
             do_connect_server(&server_id, &state, Some(&app)).await?;
             state.sftp.read_file(&server_id, &path).await
+        }
+    }
+}
+
+#[tauri::command]
+async fn sftp_read_binary_file(
+    server_id: String,
+    path: String,
+    state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
+) -> Result<ReadBinaryFileResult> {
+    let _ = ensure_server_connected(&server_id, &state, Some(&app)).await;
+
+    match state.sftp.read_binary_file(&server_id, &path).await {
+        Ok(res) => Ok(res),
+        Err(e) => {
+            tracing::warn!(
+                "sftp_read_binary_file initial attempt failed for {} at {}: {}. Attempting auto-reconnect...",
+                server_id,
+                path,
+                e
+            );
+            state.sftp.close_session(&server_id).await;
+            do_connect_server(&server_id, &state, Some(&app)).await?;
+            state.sftp.read_binary_file(&server_id, &path).await
         }
     }
 }
@@ -947,7 +972,7 @@ pub fn open_new_window(app: &tauri::AppHandle) -> Result<()> {
         tauri::WebviewWindowBuilder::new(
             app,
             &window_id,
-            tauri::WebviewUrl::App("index.html".into()),
+            tauri::WebviewUrl::App("index.html?new_window=1".into()),
         )
         .title("Remora")
         .inner_size(1280.0, 800.0)
@@ -1140,6 +1165,7 @@ pub fn run() {
             get_all_connection_states,
             sftp_read_dir,
             sftp_read_file,
+            sftp_read_binary_file,
             sftp_write_file,
             sftp_create_file,
             sftp_create_dir,

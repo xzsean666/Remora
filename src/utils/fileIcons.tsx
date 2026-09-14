@@ -10,6 +10,7 @@ import {
   ShieldAlert,
   File,
   Boxes,
+  Image as ImageIcon,
 } from "lucide-react";
 
 export function getFileIcon(fileName: string, isDir: boolean, isOpen: boolean): React.ReactNode {
@@ -59,6 +60,16 @@ export function getFileIcon(fileName: string, isDir: boolean, isOpen: boolean): 
     case "bash":
     case "zsh":
       return <FileTerminal className="w-4 h-4 text-emerald-400 flex-shrink-0" />;
+    case "png":
+    case "jpg":
+    case "jpeg":
+    case "gif":
+    case "webp":
+    case "svg":
+    case "ico":
+    case "bmp":
+    case "avif":
+      return <ImageIcon className="w-4 h-4 text-purple-400 flex-shrink-0" />;
     case "lock":
       return <ShieldAlert className="w-4 h-4 text-amber-500 flex-shrink-0" />;
     default:

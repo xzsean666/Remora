@@ -100,4 +100,25 @@ mod tests {
         let unique_dir = format!("{}_{}{}", d_stem, timestamp, d_ext);
         assert_eq!(unique_dir, "my_folder_20260908_120000");
     }
+
+    #[test]
+    fn test_guess_image_mime_by_extension_and_magic() {
+        use crate::sftp::service::guess_image_mime;
+
+        assert_eq!(guess_image_mime("avatar.png", &[]), "image/png");
+        assert_eq!(guess_image_mime("photo.jpg", &[]), "image/jpeg");
+        assert_eq!(guess_image_mime("photo.jpeg", &[]), "image/jpeg");
+        assert_eq!(guess_image_mime("anim.gif", &[]), "image/gif");
+        assert_eq!(guess_image_mime("banner.webp", &[]), "image/webp");
+        assert_eq!(guess_image_mime("logo.svg", &[]), "image/svg+xml");
+        assert_eq!(guess_image_mime("favicon.ico", &[]), "image/x-icon");
+        assert_eq!(guess_image_mime("bitmap.bmp", &[]), "image/bmp");
+        assert_eq!(guess_image_mime("hero.avif", &[]), "image/avif");
+
+        // Magic bytes fallback when extension is absent or ambiguous
+        assert_eq!(guess_image_mime("raw_data", b"\x89PNG\r\n\x1a\n"), "image/png");
+        assert_eq!(guess_image_mime("raw_data", &[0xff, 0xd8, 0xff]), "image/jpeg");
+        assert_eq!(guess_image_mime("raw_data", b"GIF89a"), "image/gif");
+        assert_eq!(guess_image_mime("unknown.bin", b"hello world"), "application/octet-stream");
+    }
 }

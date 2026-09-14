@@ -3,10 +3,12 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::OpenFlags;
 use crate::connection::ConnectionManager;
-use crate::core::{AppError, FileEntry, ReadFileResult, Result, WriteFileResult};
+use crate::core::{AppError, FileEntry, ReadBinaryFileResult, ReadFileResult, Result, WriteFileResult};
 use crate::sftp::file_entry::{from_dir_entry, sort_file_entries};
 
 pub struct SftpService {
@@ -141,6 +143,62 @@ impl SftpService {
             content,
             mtime,
             size,
+        })
+    }
+
+    pub async fn read_binary_file(&self, server_id: &str, path: &str) -> Result<ReadBinaryFileResult> {
+        match self.do_read_binary_file(server_id, path).await {
+            Ok(res) => Ok(res),
+            Err(e) => {
+                warn!(
+                    "SFTP read_binary_file failed on server {} for path {}: {:?}. Invalidating cached session and retrying...",
+                    server_id, path, e
+                );
+                self.close_session(server_id).await;
+                self.do_read_binary_file(server_id, path).await
+            }
+        }
+    }
+
+    async fn do_read_binary_file(&self, server_id: &str, path: &str) -> Result<ReadBinaryFileResult> {
+        let session_arc = self.get_or_create_session(server_id).await?;
+        let sftp = session_arc.lock().await;
+
+        let meta = sftp
+            .metadata(path)
+            .await
+            .map_err(|e| AppError::Sftp(format!("Failed to stat file {}: {}", path, e)))?;
+
+        let size = meta.len();
+        let mtime = meta.mtime.unwrap_or(0) as u64;
+
+        // 50MB protection limit
+        const MAX_BINARY_PREVIEW_SIZE: u64 = 50 * 1024 * 1024;
+        if size > MAX_BINARY_PREVIEW_SIZE {
+            return Err(AppError::Sftp(format!(
+                "File size ({:.1} MB) exceeds maximum preview limit of 50 MB",
+                (size as f64) / (1024.0 * 1024.0)
+            )));
+        }
+
+        let mut file = sftp
+            .open_with_flags(path, OpenFlags::READ)
+            .await
+            .map_err(|e| AppError::Sftp(format!("Failed to open file {}: {}", path, e)))?;
+
+        let mut buffer = Vec::with_capacity(size.min(10 * 1024 * 1024) as usize);
+        file.read_to_end(&mut buffer)
+            .await
+            .map_err(|e| AppError::Sftp(format!("Failed to read binary file {}: {}", path, e)))?;
+
+        let mime_type = guess_image_mime(path, &buffer).to_string();
+        let data_base64 = BASE64_STANDARD.encode(&buffer);
+
+        Ok(ReadBinaryFileResult {
+            data_base64,
+            mime_type,
+            size,
+            mtime,
         })
     }
 
@@ -446,5 +504,40 @@ impl SftpService {
             size: meta.len(),
             mtime: meta.mtime.unwrap_or(0) as u64,
         })
+    }
+}
+
+pub fn guess_image_mime(path: &str, bytes: &[u8]) -> &'static str {
+    let lower = path.to_lowercase();
+    if lower.ends_with(".png") {
+        "image/png"
+    } else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        "image/jpeg"
+    } else if lower.ends_with(".gif") {
+        "image/gif"
+    } else if lower.ends_with(".webp") {
+        "image/webp"
+    } else if lower.ends_with(".svg") {
+        "image/svg+xml"
+    } else if lower.ends_with(".ico") {
+        "image/x-icon"
+    } else if lower.ends_with(".bmp") {
+        "image/bmp"
+    } else if lower.ends_with(".avif") {
+        "image/avif"
+    } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "image/png"
+    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        "image/jpeg"
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        "image/gif"
+    } else if bytes.starts_with(b"RIFF") && bytes.len() >= 12 && &bytes[8..12] == b"WEBP" {
+        "image/webp"
+    } else if bytes.starts_with(b"<?xml") || bytes.starts_with(b"<svg") {
+        "image/svg+xml"
+    } else if bytes.starts_with(b"BM") {
+        "image/bmp"
+    } else {
+        "application/octet-stream"
     }
 }

@@ -562,8 +562,84 @@ export interface UpdateInfo {
   date?: string;
 }
 
+export const IMAGE_EXTENSIONS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "svg",
+  "ico",
+  "bmp",
+  "avif",
+]);
+
+export function isImageFilePath(path: string): boolean {
+  if (!path) return false;
+  const ext = path.split(".").pop()?.toLowerCase();
+  return ext ? IMAGE_EXTENSIONS.has(ext) : false;
+}
+
+export interface ReadBinaryFileResponse {
+  data_base64: string;
+  mime_type: string;
+  size: number;
+  mtime: number;
+}
+
 export async function createNewWindow(): Promise<void> {
   await safeInvoke("create_new_window");
+}
+
+/**
+ * Detects if the current frontend instance is running inside a secondary / new window.
+ * Secondary windows should start with a clean empty workspace (no auto-restore), mimicking VS Code.
+ */
+export function isNewOrAuxiliaryWindow(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("new_window") === "1" || params.get("isNewWindow") === "true") {
+      return true;
+    }
+    const label = (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
+    if (label && label !== "main") {
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+/**
+ * Asynchronous auxiliary window detector using the official WebviewWindow API.
+ */
+export async function isAuxiliaryWindowAsync(): Promise<boolean> {
+  if (isNewOrAuxiliaryWindow()) return true;
+  if (!isRunningInTauri()) return false;
+  try {
+    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    const label = getCurrentWebviewWindow().label;
+    return Boolean(label && label !== "main");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Dynamically updates the native OS desktop window title, matching VS Code convention:
+ * "[Project Name] - Remora" or "Remora".
+ */
+export async function setAppWindowTitle(title: string): Promise<void> {
+  if (typeof document !== "undefined") {
+    document.title = title;
+  }
+  if (!isRunningInTauri()) return;
+  try {
+    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+    await getCurrentWebviewWindow().setTitle(title);
+  } catch (err) {
+    console.debug("Failed to set native window title:", err);
+  }
 }
 
 export async function checkUpdate(): Promise<UpdateInfo> {
