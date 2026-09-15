@@ -638,14 +638,64 @@ async fn transfer_upload(
 async fn transfer_download(
     server_id: String,
     remote_path: String,
-    local_path: String,
+    local_path: Option<String>,
     state: State<'_, Arc<AppState>>,
     app: tauri::AppHandle,
 ) -> Result<String> {
+    let local_path_str = local_path.unwrap_or_default();
     state
         .transfer
-        .start_download(&server_id, &remote_path, &local_path, Some(app))
+        .start_download(&server_id, &remote_path, &local_path_str, Some(app))
         .await
+}
+
+#[tauri::command]
+fn get_default_download_dir() -> Result<String> {
+    let dir = crate::transfer::TransferManager::get_default_download_dir();
+    if !dir.exists() {
+        let _ = std::fs::create_dir_all(&dir);
+    }
+    Ok(dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn open_download_dir<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<String> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = crate::transfer::TransferManager::get_default_download_dir();
+    if !dir.exists() {
+        let _ = std::fs::create_dir_all(&dir);
+    }
+    let dir_str = dir.to_string_lossy().to_string();
+    app.opener()
+        .open_path(&dir_str, None::<&str>)
+        .map_err(|e| AppError::Internal(format!("Failed to open download folder: {}", e)))?;
+    Ok(dir_str)
+}
+
+#[tauri::command]
+async fn show_item_in_folder<R: tauri::Runtime>(
+    path: String,
+    app: tauri::AppHandle<R>,
+) -> Result<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let p = std::path::Path::new(&path);
+    if p.exists() {
+        if p.is_dir() {
+            let _ = app.opener().open_path(&path, None::<&str>);
+        } else if app.opener().reveal_item_in_dir(p).is_err() {
+            if let Some(parent) = p.parent() {
+                let _ = app.opener().open_path(parent.to_string_lossy().to_string(), None::<&str>);
+            }
+        }
+    } else if let Some(parent) = p.parent() {
+        if parent.exists() {
+            let _ = app.opener().open_path(parent.to_string_lossy().to_string(), None::<&str>);
+        } else {
+            let default_dir = crate::transfer::TransferManager::get_default_download_dir();
+            let _ = app.opener().open_path(default_dir.to_string_lossy().to_string(), None::<&str>);
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1197,6 +1247,9 @@ pub fn run() {
             transfer_download,
             transfer_cancel,
             transfer_list,
+            get_default_download_dir,
+            open_download_dir,
+            show_item_in_folder,
             get_quick_snippets,
             save_quick_snippet,
             delete_quick_snippet,

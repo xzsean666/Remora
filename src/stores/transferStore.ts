@@ -26,9 +26,12 @@ interface TransferState {
   fetchTransfers: () => Promise<void>;
   listenProgress: () => Promise<() => void>;
   uploadFile: (serverId: string, localPath: string, remotePath: string) => Promise<string>;
-  downloadFile: (serverId: string, remotePath: string, localPath: string) => Promise<string>;
+  downloadFile: (serverId: string, remotePath: string, localPath?: string) => Promise<string>;
   cancelTransfer: (taskId: string) => Promise<void>;
   clearCompleted: () => void;
+  openDownloadDir: () => Promise<string>;
+  showItemInFolder: (path: string) => Promise<void>;
+  getDefaultDownloadDir: () => Promise<string>;
 }
 
 export const useTransferStore = create<TransferState>((set, get) => ({
@@ -71,14 +74,42 @@ export const useTransferStore = create<TransferState>((set, get) => ({
     return taskId;
   },
 
-  downloadFile: async (serverId: string, remotePath: string, localPath: string) => {
+  downloadFile: async (serverId: string, remotePath: string, localPath?: string) => {
     const taskId = await invoke<string>("transfer_download", {
       serverId,
       remotePath,
-      localPath,
+      localPath: localPath || null,
     });
     get().fetchTransfers();
     return taskId;
+  },
+
+  openDownloadDir: async () => {
+    try {
+      const dir = await invoke<string>("open_download_dir");
+      return dir;
+    } catch (err) {
+      console.error("Failed to open download dir:", err);
+      throw err;
+    }
+  },
+
+  showItemInFolder: async (path: string) => {
+    try {
+      await invoke("show_item_in_folder", { path });
+    } catch (err) {
+      console.error("Failed to show item in folder:", err);
+      throw err;
+    }
+  },
+
+  getDefaultDownloadDir: async () => {
+    try {
+      return await invoke<string>("get_default_download_dir");
+    } catch (err) {
+      console.error("Failed to get default download dir:", err);
+      return "~/Downloads/Remora";
+    }
   },
 
   cancelTransfer: async (taskId: string) => {

@@ -65,16 +65,17 @@
 | **TASK-054** | 远程图片文件可靠预览与缩放查看能力支持 (Remote Image SFTP Binary Preview & Zoom Viewer) | TASK-004, TASK-008 | **DONE** | `docs/AI/tasks/TASK-054.md` |
 | **TASK-055** | TMUX / 普通终端鼠标划选即复制 (Copy-on-Select + OSC 52) 与终端全场景抗闪烁渲染引擎 (Atomic Coalescing & Clean DOM Renderer) | TASK-009, TASK-049, TASK-052 | **DONE** | `docs/AI/tasks/TASK-055.md` |
 | **TASK-056** | 服务器负载轻量实时概览 (CPU/内存/磁盘/网络 5秒免存盘轮询) 与桌面蓝色状态栏及移动端紧凑微型栏全景展示 | TASK-003, TASK-005, TASK-019, TASK-028, TASK-043 | **DONE** | `docs/AI/tasks/TASK-056.md` |
+| **TASK-057** | 默认下载目录重构至 ~/Downloads/Remora 与传输面板一键原生文件管理器穿透 | TASK-004, TASK-056 | **DONE** | `docs/AI/tasks/TASK-057.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 57
+- **已完成 (DONE)**: 58
 - **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 57
+- **总任务数**: 58
 
 ---
 

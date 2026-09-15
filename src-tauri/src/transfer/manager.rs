@@ -392,6 +392,13 @@ impl TransferManager {
         Ok(())
     }
 
+    pub fn get_default_download_dir() -> std::path::PathBuf {
+        let base = dirs::download_dir()
+            .or_else(|| dirs::home_dir().map(|h| h.join("Downloads")))
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        base.join("Remora")
+    }
+
     pub async fn start_download(
         &self,
         server_id: &str,
@@ -415,6 +422,13 @@ impl TransferManager {
             .unwrap_or("file")
             .to_string();
 
+        let effective_local_path = if local_path.trim().is_empty() {
+            let dir = Self::get_default_download_dir();
+            dir.join(&filename).to_string_lossy().to_string()
+        } else {
+            local_path.to_string()
+        };
+
         let task_id = Uuid::new_v4().to_string();
         let now = chrono::Utc::now().timestamp_millis();
 
@@ -422,7 +436,7 @@ impl TransferManager {
             id: task_id.clone(),
             server_id: server_id.to_string(),
             direction: TransferDirection::Download,
-            local_path: local_path.to_string(),
+            local_path: effective_local_path.clone(),
             remote_path: remote_path.to_string(),
             filename,
             total_bytes,
@@ -447,7 +461,7 @@ impl TransferManager {
         let sftp_service = self.sftp.clone();
         let server_id_owned = server_id.to_string();
         let remote_path_owned = remote_path.to_string();
-        let local_path_owned = local_path.to_string();
+        let local_path_owned = effective_local_path;
         let task_handle_clone = task_handle.clone();
 
         tokio::spawn(async move {
@@ -503,6 +517,15 @@ impl TransferManager {
                 return;
             }
         };
+
+        if let Some(parent) = Path::new(&local_path).parent() {
+            if !parent.exists() {
+                if let Err(e) = tokio::fs::create_dir_all(parent).await {
+                    Self::fail_task(&task, &app_handle, format!("Failed to create download directory: {}", e)).await;
+                    return;
+                }
+            }
+        }
 
         let mut local_file = match tokio::fs::File::create(&local_path).await {
             Ok(f) => f,

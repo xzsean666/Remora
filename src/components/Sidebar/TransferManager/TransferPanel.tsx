@@ -10,6 +10,7 @@ import {
   AlertCircle,
   Ban,
   UploadCloud,
+  FolderOpen,
 } from "lucide-react";
 import { useTransferStore, TransferItem } from "../../../stores/transferStore";
 
@@ -28,6 +29,8 @@ export const TransferPanel: React.FC = () => {
     listenProgress,
     cancelTransfer,
     clearCompleted,
+    openDownloadDir,
+    showItemInFolder,
   } = useTransferStore();
 
   useEffect(() => {
@@ -61,6 +64,13 @@ export const TransferPanel: React.FC = () => {
 
         <div className="flex items-center gap-1 flex-shrink-0">
           <button
+            title="打开下载目录 (~/Downloads/Remora)"
+            onClick={() => openDownloadDir()}
+            className="p-1 hover:text-white hover:bg-vscode-hover rounded transition-colors text-vscode-textBright"
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+          </button>
+          <button
             title="Refresh Transfers"
             onClick={fetchTransfers}
             className="p-1 hover:text-white hover:bg-vscode-hover rounded transition-colors"
@@ -86,6 +96,14 @@ export const TransferPanel: React.FC = () => {
             <p className="text-[11px] text-vscode-textMuted leading-relaxed max-w-[200px]">
               Uploaded files via drag & drop or downloaded files will show here with real-time progress.
             </p>
+            <button
+              onClick={() => openDownloadDir()}
+              className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded bg-vscode-activityBarActive text-white hover:bg-blue-600 active:scale-95 transition-all shadow-sm cursor-pointer"
+              title="在系统文件管理器中打开 ~/Downloads/Remora"
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              <span>打开下载目录</span>
+            </button>
           </div>
         ) : (
           transfers.map((item) => (
@@ -93,6 +111,7 @@ export const TransferPanel: React.FC = () => {
               key={item.id}
               item={item}
               onCancel={() => cancelTransfer(item.id)}
+              onShowInFolder={() => showItemInFolder(item.local_path)}
             />
           ))
         )}
@@ -104,9 +123,10 @@ export const TransferPanel: React.FC = () => {
 interface TransferCardProps {
   item: TransferItem;
   onCancel: () => void;
+  onShowInFolder: () => void;
 }
 
-const TransferCard: React.FC<TransferCardProps> = ({ item, onCancel }) => {
+const TransferCard: React.FC<TransferCardProps> = ({ item, onCancel, onShowInFolder }) => {
   const percentage = Math.min(
     100,
     Math.round((item.transferred_bytes / (item.total_bytes || 1)) * 100)
@@ -115,7 +135,7 @@ const TransferCard: React.FC<TransferCardProps> = ({ item, onCancel }) => {
   const isUploading = item.direction === "upload";
 
   return (
-    <div className="p-2.5 rounded-md border border-vscode-border/60 bg-vscode-bg/40 flex flex-col gap-1.5 group">
+    <div className="p-2.5 rounded-md border border-vscode-border/60 bg-vscode-bg/40 flex flex-col gap-1.5 group hover:border-vscode-border transition-colors">
       {/* Title & Direction */}
       <div className="flex items-center justify-between gap-1 min-w-0">
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
@@ -133,7 +153,7 @@ const TransferCard: React.FC<TransferCardProps> = ({ item, onCancel }) => {
           </span>
         </div>
 
-        {/* Cancel button if active */}
+        {/* Cancel button if active or Reveal button if completed */}
         {(item.status === "pending" || item.status === "transferring") && (
           <button
             onClick={onCancel}
@@ -141,6 +161,18 @@ const TransferCard: React.FC<TransferCardProps> = ({ item, onCancel }) => {
             className="p-1 rounded text-vscode-textMuted hover:text-red-400 hover:bg-vscode-hover transition-colors flex-shrink-0"
           >
             <X className="w-3 h-3" />
+          </button>
+        )}
+        {item.status === "completed" && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onShowInFolder();
+            }}
+            title={`在系统文件管理器中查看: ${item.local_path}`}
+            className="p-1 rounded text-vscode-textMuted hover:text-white hover:bg-vscode-hover transition-colors flex-shrink-0 cursor-pointer"
+          >
+            <FolderOpen className="w-3.5 h-3.5 text-blue-400" />
           </button>
         )}
       </div>
@@ -175,10 +207,17 @@ const TransferCard: React.FC<TransferCardProps> = ({ item, onCancel }) => {
           )}
 
           {item.status === "completed" && (
-            <span className="flex items-center gap-1 text-emerald-400 font-sans">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onShowInFolder();
+              }}
+              title={`在文件夹中显示: ${item.local_path}`}
+              className="flex items-center gap-1 text-emerald-400 hover:text-emerald-300 font-sans cursor-pointer transition-colors"
+            >
               <CheckCircle2 className="w-3 h-3" />
-              Done
-            </span>
+              <span>Done</span>
+            </button>
           )}
 
           {item.status === "failed" && (
@@ -206,6 +245,28 @@ const TransferCard: React.FC<TransferCardProps> = ({ item, onCancel }) => {
           )}
         </div>
       </div>
+
+      {/* Local Path & Reveal Action */}
+      {item.local_path && (
+        <div className="flex items-center justify-between gap-1 pt-1 border-t border-vscode-border/30 text-[9.5px] text-vscode-textMuted font-mono min-w-0">
+          <span className="truncate flex-1 opacity-75" title={item.local_path}>
+            {item.local_path}
+          </span>
+          {item.status === "completed" && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onShowInFolder();
+              }}
+              title={`在系统文件管理器中查看: ${item.local_path}`}
+              className="px-1.5 py-0.5 rounded bg-vscode-hover hover:bg-vscode-activityBarActive hover:text-white text-vscode-textBright text-[10px] font-sans flex items-center gap-1 flex-shrink-0 transition-colors cursor-pointer"
+            >
+              <FolderOpen className="w-3 h-3 text-blue-400" />
+              <span>打开位置</span>
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 };

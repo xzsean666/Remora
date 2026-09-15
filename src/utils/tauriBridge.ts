@@ -454,6 +454,17 @@ export async function safeInvoke<T = any>(cmd: string, args?: Record<string, any
     case "transfer_cancel": {
       return undefined as unknown as T;
     }
+    case "get_default_download_dir": {
+      return "~/Downloads/Remora" as unknown as T;
+    }
+    case "open_download_dir": {
+      console.log("[Mock] Opening download dir: ~/Downloads/Remora");
+      return "~/Downloads/Remora" as unknown as T;
+    }
+    case "show_item_in_folder": {
+      console.log("[Mock] Showing item in folder:", args?.path);
+      return undefined as unknown as T;
+    }
     case "install_update": {
       return undefined as unknown as T;
     }

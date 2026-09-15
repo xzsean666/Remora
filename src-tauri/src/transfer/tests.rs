@@ -76,4 +76,10 @@ mod tests {
         assert!(json.contains("transferring"));
         assert!(json.contains("file.txt"));
     }
+
+    #[test]
+    fn test_default_download_dir() {
+        let dir = TransferManager::get_default_download_dir();
+        assert!(dir.ends_with("Remora"));
+    }
 }

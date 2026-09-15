@@ -417,7 +417,7 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
           }}
           onDownload={
             !entry.is_dir && currentServerId
-              ? () => downloadFile(currentServerId, entry.path, `/tmp/${entry.name}`)
+              ? () => downloadFile(currentServerId, entry.path)
               : undefined
           }
         />
