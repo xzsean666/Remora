@@ -17,6 +17,10 @@ function isEditableElement(el: Element | null): el is HTMLElement {
   if (!el || !(el instanceof HTMLElement)) return false;
   // Ignore xterm internal helper textarea to prevent disrupting terminal fit
   if (el.classList.contains("xterm-helper-textarea")) return false;
+  // Ignore CodeMirror editor elements - CodeMirror manages its own viewport, cursor, and scroll positioning
+  if (el.closest(".cm-editor") || el.classList.contains("cm-content") || el.closest(".cm-scroller")) {
+    return false;
+  }
   const tag = el.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
 }

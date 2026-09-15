@@ -13,6 +13,7 @@ import { MobileTabBar } from "./components/Layout/MobileTabBar";
 import { MobileOverviewBar } from "./components/Layout/MobileOverviewBar";
 import { ServerOverviewModal } from "./components/StatusBar/ServerOverviewModal";
 import { GitPanel } from "./components/Sidebar/Git/GitPanel";
+import { SearchPanel } from "./components/Sidebar/Search/SearchPanel";
 import { useLayoutStore } from "./stores/layoutStore";
 import { useEditorStore } from "./stores/editorStore";
 import { useFileTreeStore } from "./stores/fileTreeStore";
@@ -102,6 +103,15 @@ export default function App() {
         } else if (e.key === "k" || e.key === "K") {
           e.preventDefault();
           toggleSidebarTab("snippets");
+        } else if (e.key === "f" || e.key === "F") {
+          e.preventDefault();
+          toggleSidebarTab("search");
+        } else if (e.key === "e" || e.key === "E") {
+          e.preventDefault();
+          toggleSidebarTab("explorer");
+        } else if (e.key === "g" || e.key === "G") {
+          e.preventDefault();
+          toggleSidebarTab("git");
         }
       }
     };
@@ -207,6 +217,7 @@ export default function App() {
           }}
         />
       )}
+      {activeSidebarTab === "search" && <SearchPanel />}
       {activeSidebarTab === "git" && <GitPanel />}
       {activeSidebarTab === "servers" && <ServerManager />}
       {activeSidebarTab === "snippets" && <QuickInputPanel />}

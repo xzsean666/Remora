@@ -862,3 +862,55 @@ export function formatUptime(seconds: number): string {
   return `${minutes}分钟`;
 }
 
+export interface SearchLineMatch {
+  line_number: number;
+  column_number: number;
+  line_content: string;
+  match_start: number;
+  match_end: number;
+}
+
+export interface SearchFileMatch {
+  path: string;
+  relative_path: string;
+  matches: SearchLineMatch[];
+}
+
+export interface SearchResult {
+  query: string;
+  total_matches: number;
+  total_files: number;
+  files: SearchFileMatch[];
+  truncated: boolean;
+  duration_ms: number;
+  engine_used: string;
+}
+
+export interface SearchParams {
+  serverId: string;
+  rootPath: string;
+  query: string;
+  caseSensitive: boolean;
+  wholeWord: boolean;
+  isRegex: boolean;
+  includePattern?: string;
+  excludePattern?: string;
+  maxResults?: number;
+}
+
+export async function searchInFiles(params: SearchParams): Promise<SearchResult> {
+  return await safeInvoke<SearchResult>("search_in_files", {
+    params: {
+      server_id: params.serverId,
+      root_path: params.rootPath,
+      query: params.query,
+      case_sensitive: params.caseSensitive,
+      whole_word: params.wholeWord,
+      is_regex: params.isRegex,
+      include_pattern: params.includePattern || null,
+      exclude_pattern: params.excludePattern || null,
+      max_results: params.maxResults || 1000,
+    },
+  });
+}
+

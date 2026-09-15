@@ -2,6 +2,7 @@ pub mod connection;
 pub mod core;
 pub mod overview;
 pub mod security;
+pub mod search;
 pub mod sftp;
 pub mod storage;
 pub mod terminal;
@@ -15,6 +16,7 @@ use crate::core::{
     ServerConfig, ServerOverview, SshKey, WriteFileResult,
 };
 use crate::overview::OverviewService;
+use crate::search::{SearchParams, SearchResult, SearchService};
 use crate::security::KeyringService;
 use crate::sftp::SftpService;
 use crate::storage::StorageService;
@@ -1027,6 +1029,16 @@ async fn get_server_overview(
     state.overview.get_overview(&server_id).await
 }
 
+// --- Search Command ---
+
+#[tauri::command]
+async fn search_in_files(
+    params: SearchParams,
+    state: State<'_, Arc<AppState>>,
+) -> Result<SearchResult> {
+    SearchService::search_in_files(&state.connection, params).await
+}
+
 // --- Window & Lifecycle Commands ---
 
 pub fn open_new_window(app: &tauri::AppHandle) -> Result<()> {
@@ -1262,7 +1274,8 @@ pub fn run() {
             git_get_status,
             git_checkout,
             git_get_diff,
-            get_server_overview
+            get_server_overview,
+            search_in_files
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

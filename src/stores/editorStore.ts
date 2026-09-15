@@ -5,6 +5,7 @@ import {
   isImageFilePath,
   type ReadBinaryFileResponse,
 } from "../utils/tauriBridge";
+import { clearEditorCache } from "../utils/editorCache";
 
 export interface EditorTab {
   serverId: string;
@@ -16,6 +17,7 @@ export interface EditorTab {
   isDirty: boolean;
   isPreview: boolean;
   cursor?: { line: number; ch: number };
+  targetPosition?: { line: number; ch?: number };
   fileType?: "text" | "image";
   imageDataUrl?: string;
   mimeType?: string;
@@ -48,7 +50,7 @@ interface EditorState {
   loading: boolean;
   conflictInfo: ConflictInfo | null;
 
-  openFile: (serverId: string, path: string, isPreview?: boolean) => Promise<void>;
+  openFile: (serverId: string, path: string, isPreview?: boolean, targetPosition?: { line: number; ch?: number }) => Promise<void>;
   closeTab: (path: string) => void;
   closeOtherTabs: (path: string) => void;
   closeAllTabs: () => void;
@@ -67,20 +69,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   loading: false,
   conflictInfo: null,
 
-  openFile: async (serverId: string, path: string, isPreview = false) => {
+  openFile: async (serverId: string, path: string, isPreview = false, targetPosition?: { line: number; ch?: number }) => {
     const { tabs } = get();
     const existingIndex = tabs.findIndex((t) => t.path === path);
 
     // If file is already opened in a tab
     if (existingIndex >= 0) {
-      if (!isPreview && tabs[existingIndex].isPreview) {
+      const updatedTabs = [...tabs];
+      const existingTab = { ...updatedTabs[existingIndex] };
+      if (!isPreview && existingTab.isPreview) {
         // Promote preview tab to permanent tab
-        const updatedTabs = [...tabs];
-        updatedTabs[existingIndex] = { ...updatedTabs[existingIndex], isPreview: false };
-        set({ tabs: updatedTabs, activeTabPath: path });
-      } else {
-        set({ activeTabPath: path });
+        existingTab.isPreview = false;
       }
+      if (targetPosition) {
+        existingTab.targetPosition = targetPosition;
+      }
+      updatedTabs[existingIndex] = existingTab;
+      set({ tabs: updatedTabs, activeTabPath: path });
       return;
     }
 
@@ -116,6 +121,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           mtime: res.mtime,
           isDirty: false,
           isPreview,
+          targetPosition,
           fileType: "image",
           imageDataUrl: dataUrl,
           mimeType: res.mime_type,
@@ -138,6 +144,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           mtime: res.mtime,
           isDirty: false,
           isPreview,
+          targetPosition,
           fileType: "text",
         };
       }
@@ -185,6 +192,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const tabIndex = tabs.findIndex((t) => t.path === path);
     if (tabIndex === -1) return;
 
+    clearEditorCache(path);
+
     const newTabs = tabs.filter((t) => t.path !== path);
     let newActivePath = activeTabPath;
 
@@ -203,11 +212,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   closeOtherTabs: (path: string) => {
     const { tabs } = get();
+    tabs.forEach((t) => {
+      if (t.path !== path) {
+        clearEditorCache(t.path);
+      }
+    });
     const remaining = tabs.filter((t) => t.path === path);
     set({ tabs: remaining, activeTabPath: path });
   },
 
   closeAllTabs: () => {
+    clearEditorCache();
     set({ tabs: [], activeTabPath: null });
   },
 

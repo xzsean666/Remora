@@ -1,5 +1,5 @@
 import React from "react";
-import { FolderTree, Server, GitBranch, Zap, ArrowLeftRight, Settings, TerminalSquare, CopyPlus } from "lucide-react";
+import { FolderTree, Search, Server, GitBranch, Zap, ArrowLeftRight, Settings, TerminalSquare, CopyPlus } from "lucide-react";
 import { useLayoutStore, SidebarTab } from "../../stores/layoutStore";
 import { useGitStore } from "../../stores/gitStore";
 import { createNewWindow } from "../../utils/tauriBridge";
@@ -16,6 +16,7 @@ export const ActivityBar: React.FC = () => {
 
   const navItems: { id: SidebarTab; label: string; icon: React.ReactNode; badge?: number }[] = [
     { id: "explorer", label: "Project Explorer (Ctrl+Shift+E)", icon: <FolderTree className="w-5 h-5" /> },
+    { id: "search", label: "Search across Files (Ctrl+Shift+F)", icon: <Search className="w-5 h-5" /> },
     {
       id: "git",
       label: "Source Control (Ctrl+Shift+G)",

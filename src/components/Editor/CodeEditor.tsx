@@ -7,6 +7,7 @@ import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { languages } from "@codemirror/language-data";
 import { useEditorStore, EditorTab } from "../../stores/editorStore";
+import { getEditorCache, setEditorCache } from "../../utils/editorCache";
 
 interface CodeEditorProps {
   tab: EditorTab;
@@ -17,9 +18,6 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tab }) => {
   const viewRef = useRef<EditorView | null>(null);
   const langCompartment = useRef(new Compartment());
   const { updateContent, saveActiveFile } = useEditorStore();
-
-  // Cache editor states per file path so undo/redo history and cursor positions persist
-  const statesRef = useRef<Map<string, EditorState>>(new Map());
 
   // Store latest callbacks in refs to avoid recreating extensions
   const updateContentRef = useRef(updateContent);
@@ -95,12 +93,16 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tab }) => {
       }),
     ];
 
-    const state =
-      statesRef.current.get(tab.path) ||
-      EditorState.create({
+    const cached = getEditorCache(tab.path);
+    let state: EditorState;
+    if (cached && cached.state.doc.toString() === tab.content) {
+      state = cached.state;
+    } else {
+      state = EditorState.create({
         doc: tab.content,
         extensions: createExtensions(),
       });
+    }
 
     const view = new EditorView({
       state,
@@ -108,6 +110,30 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tab }) => {
     });
 
     viewRef.current = view;
+
+    if (tab.targetPosition) {
+      const pos = tab.targetPosition;
+      const lineNum = Math.max(1, Math.min(pos.line, state.doc.lines));
+      const lineObj = state.doc.line(lineNum);
+      const ch = Math.max(0, (pos.ch ?? 1) - 1);
+      const offset = Math.min(lineObj.from + ch, lineObj.to);
+      requestAnimationFrame(() => {
+        if (isMounted && viewRef.current) {
+          viewRef.current.dispatch({
+            selection: { anchor: offset, head: offset },
+            scrollIntoView: true,
+          });
+          viewRef.current.focus();
+        }
+      });
+    } else if (cached) {
+      requestAnimationFrame(() => {
+        if (isMounted && viewRef.current?.scrollDOM) {
+          viewRef.current.scrollDOM.scrollTop = cached.scrollTop;
+          viewRef.current.scrollDOM.scrollLeft = cached.scrollLeft;
+        }
+      });
+    }
 
     if (langDesc && !langDesc.support) {
       langDesc.load().then((support) => {
@@ -123,11 +149,40 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tab }) => {
 
     return () => {
       isMounted = false;
-      statesRef.current.set(tab.path, view.state);
-      view.destroy();
-      viewRef.current = null;
+      if (viewRef.current) {
+        setEditorCache(tab.path, {
+          state: viewRef.current.state,
+          scrollTop: viewRef.current.scrollDOM.scrollTop,
+          scrollLeft: viewRef.current.scrollDOM.scrollLeft,
+        });
+        viewRef.current.destroy();
+        viewRef.current = null;
+      }
     };
   }, [tab.path]);
+
+  // Handle updates to targetPosition while the same tab is already mounted
+  useEffect(() => {
+    const pos = tab.targetPosition;
+    const view = viewRef.current;
+    if (!pos || !view) return;
+
+    const doc = view.state.doc;
+    const lineNum = Math.max(1, Math.min(pos.line, doc.lines));
+    const lineObj = doc.line(lineNum);
+    const ch = Math.max(0, (pos.ch ?? 1) - 1);
+    const offset = Math.min(lineObj.from + ch, lineObj.to);
+
+    requestAnimationFrame(() => {
+      if (viewRef.current) {
+        viewRef.current.dispatch({
+          selection: { anchor: offset, head: offset },
+          scrollIntoView: true,
+        });
+        viewRef.current.focus();
+      }
+    });
+  }, [tab.targetPosition?.line, tab.targetPosition?.ch]);
 
   // Synchronize document if tab content was updated externally (e.g. reload on conflict)
   useEffect(() => {
@@ -144,3 +199,4 @@ export const CodeEditor: React.FC<CodeEditorProps> = ({ tab }) => {
 
   return <div ref={containerRef} className="w-full h-full overflow-hidden" />;
 };
+

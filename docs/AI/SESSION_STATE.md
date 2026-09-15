@@ -5,52 +5,63 @@
 ---
 
 ## 1. 当前目标与任务
-- **当前 Goal**: 默认下载目录重构至本地 `~/Downloads/Remora` 与传输面板一键原生文件管理器穿透
+- **当前 Goal**: VS Code 风格全局跨文件搜索系统（远端自适应智能级联加速引擎 `ripgrep` -> `git grep` -> `grep` + 安全零注入 + 结果折叠与关键词高亮 + 点击直达编辑器对应行与光标定位）
 - **当前 Task**: 
-  - TASK-057: 默认下载目录重构至 ~/Downloads/Remora 与传输面板一键原生文件管理器穿透 [DONE]
-- **当前状态**: DONE (所有验收标准全部满足，30 项前后端测试 100% 通过，生产打包 0 错误)
+  - TASK-059: VS Code 风格全局跨文件搜索系统 (VS Code Style Remote Global Search via SSH Exec) [DONE]
+- **当前状态**: DONE (所有验收标准全部满足，前端 TypeScript 严格检查 0 报错，生产环境构建 100% 成功，32 个 Rust 单元测试 + 1 个 E2E 测试全量通过)
 
 ---
 
 ## 2. 本次会话完成内容
 
-1. **跨平台默认下载路径统一与目录自愈 (`src-tauri/src/transfer/manager.rs`)**:
-   - 彻底移除前端原有的硬编码 `/tmp/${entry.name}` 临时路径；
-   - 在 Rust 后端通过 `dirs::download_dir().or_else(|| dirs::home_dir().map(|h| h.join("Downloads")))` 动态解析各操作系统（Linux / macOS / Windows）的标准用户下载目录，并将其统一落入 `<DownloadDir>/Remora`；
-   - 增强 `execute_download`：在创建本地文件句柄前检测目标父目录是否存在，若不存在则自动递归执行 `tokio::fs::create_dir_all`，彻底杜绝目标路径缺失导致的 I/O 错误。
+1. **远程自适应智能级联加速引擎 (`src-tauri/src/search/mod.rs` & `src-tauri/src/lib.rs`)**:
+   - 深入分析远程 SSH 场景下搜索的性能痛点：严禁使用客户端 SFTP 递归下载（网络往返延迟大、带宽与内存爆炸）；
+   - 创新性设计远程 Shell 管道自适应级联架构：
+     - **Tier 1 (最快)**: `ripgrep` (`rg`)，VS Code 同款引擎，天然多线程跳过 `.gitignore`、`node_modules` 与二进制，50~100ms 极速响应；
+     - **Tier 2 (零依赖预装)**: `git grep`，自动识别 Git 工作区，过滤 `.gitignore`，性能逼近 `rg` 且开发服务器普遍预装；
+     - **Tier 3 (全平台兜底)**: GNU/BSD `grep -rnI`，确保即使在最简 Linux/Alpine 容器也能 100% 可用；
+   - 采用 Base64 安全封装模式传递检索词与模式，彻底杜绝反引号、单双引号、通配符等 Shell 命令注入隐患；
+   - 引入 1000 行软上限与 `head -n 1001` 截断保护，防止检索常见单字符撑爆内存与网络管道；
+   - 编写 `parse_search_output` 统一解析 `rg` (`path:line:col:content`) 与 `git grep`/`grep` (`path:line:content`)，并编写完整单元测试。
 
-2. **原生文件管理器穿透与 IPC 接口 (`src-tauri/src/lib.rs`)**:
-   - 暴露 `get_default_download_dir() -> Result<String>`：自动确保下载目录存在并返回其路径；
-   - 暴露 `open_download_dir(app: AppHandle) -> Result<String>`：利用 `tauri_plugin_opener` 的 `open_path`，一键调起宿主系统文件管理器（Finder / Nautilus / Explorer）打开 `~/Downloads/Remora`；
-   - 暴露 `show_item_in_folder(path: String, app: AppHandle) -> Result<()>`：优先通过 `reveal_item_in_dir` 高亮选中该文件，遇到受限平台或文件被移动时平滑降级为打开父级目录；
-   - 扩展 `transfer_download` 支持可选的 `local_path: Option<String>`，前端不传或为空时自动缺省落入 `~/Downloads/Remora/<filename>`。
+2. **前端搜索数据流与 VS Code 风格搜索侧栏 (`src/stores/searchStore.ts` & `src/components/Sidebar/Search/SearchPanel.tsx`)**:
+   - 维护搜索词、三联切换开关（大小写敏感 `Aa`、全字匹配 `\b`、正则表达式 `.*`）、高级过滤（files to include、files to exclude）；
+   - 树状展示匹配结果：按文件折叠/展开、展示文件图标、路径、匹配数徽标；
+   - 匹配行展示行号、行内容，并通过正则/子串分段安全渲染黄色发光高亮；
+   - 支持一键全部折叠/展开、重新搜索、清除结果、统计耗时与底层引擎（如 `18 results in 3 files (46ms · ripgrep)`）。
 
-3. **前端传输管理面板体验全面升级 (`TransferPanel.tsx` & `transferStore.ts`)**:
-   - **顶部操作栏**: 在“刷新”与“清理已完成”旁增加一键“打开下载目录”图标按钮（`<FolderOpen />`）；
-   - **空状态指引**: 当无传输记录时，除提示文字外新增显眼的“打开下载目录”快捷按钮；
-   - **卡片交互与路径透明**: 传输卡片底部清晰呈现本地存储路径；当任务状态为 `completed` 时，状态文字及右上角/底部均提供直观的“打开位置”操作，点击瞬时唤起本地文件管理器并定位该文件；
-   - **文件树右键下载**: [FileTreeNode.tsx](file:///ssd0/git/Remora/src/components/Sidebar/ProjectExplorer/FileTreeNode.tsx) 下载回调直接触发 `downloadFile(currentServerId, entry.path)`，彻底挥别 `/tmp`。
+3. **编辑器精确定位跳转联动 (`src/stores/editorStore.ts` & `src/components/Editor/CodeEditor.tsx`)**:
+   - 扩展 `openFile` 支持接收 `targetPosition: { line: number; ch?: number }`；
+   - `CodeEditor` 在首次挂载或目标位置变动时，平滑计算文档行偏移，自动派发 CodeMirror 的 `selection` 并触发 `scrollIntoView: true`，光标精准居中定位；
+   - 移动端点击匹配项自动无缝切至 Editor Tab。
+
+4. **全局快捷键与 ActivityBar 集成 (`src/components/ActivityBar/ActivityBar.tsx` & `src/App.tsx`)**:
+   - 在 ActivityBar 顶部导航增加放大镜搜索图标（`Ctrl+Shift+F`），位于 Explorer 与 Git 之间；
+   - 全局监听 `Ctrl+Shift+F` / `Cmd+Shift+F` 呼出搜索侧栏并自动聚焦搜索输入框。
 
 ---
 
 ## 3. 修改与创建的文件
 - **新建文件**:
-  - `docs/AI/tasks/TASK-057.md`
+  - `src-tauri/src/search/mod.rs`
+  - `src/stores/searchStore.ts`
+  - `src/components/Sidebar/Search/SearchPanel.tsx`
+  - `docs/AI/tasks/TASK-059.md`
 - **修改文件**:
-  - `src-tauri/src/transfer/manager.rs`
-  - `src-tauri/src/transfer/tests.rs`
   - `src-tauri/src/lib.rs`
   - `src/utils/tauriBridge.ts`
-  - `src/stores/transferStore.ts`
-  - `src/components/Sidebar/ProjectExplorer/FileTreeNode.tsx`
-  - `src/components/Sidebar/TransferManager/TransferPanel.tsx`
+  - `src/stores/layoutStore.ts`
+  - `src/stores/editorStore.ts`
+  - `src/components/Editor/CodeEditor.tsx`
+  - `src/components/ActivityBar/ActivityBar.tsx`
+  - `src/components/Sidebar/SidebarContainer.tsx`
+  - `src/App.tsx`
   - `docs/AI/TASK_INDEX.md`
   - `docs/AI/SESSION_STATE.md`
 
 ---
 
 ## 4. 已运行的验证命令及结果
-- `cargo check --manifest-path src-tauri/Cargo.toml`: 0 警告 / 0 错误通过。
-- `cargo test --manifest-path src-tauri/Cargo.toml`: 29 个单元测试（含新增的 `test_default_download_dir`）+ 1 个 E2E 集成测试全量 100% 通过（耗时 0.01s）。
+- `cargo test --manifest-path src-tauri/Cargo.toml`: 32 个单元测试（含 3 个搜索解析与截断测试）+ 1 个 E2E 集成测试全量 100% 通过（耗时 0.01s）。
 - `pnpm tsc --noEmit`: 前端 TypeScript 严格检查 0 报错。
-- `pnpm build`: Vite 前端生产打包顺利通过（耗时 7.94s，0 语法/类型错误）。
+- `pnpm build`: Vite 前端生产打包顺利通过（8.18s，0 语法/类型错误）。

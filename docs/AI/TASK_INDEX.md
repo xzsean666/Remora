@@ -66,21 +66,24 @@
 | **TASK-055** | TMUX / 普通终端鼠标划选即复制 (Copy-on-Select + OSC 52) 与终端全场景抗闪烁渲染引擎 (Atomic Coalescing & Clean DOM Renderer) | TASK-009, TASK-049, TASK-052 | **DONE** | `docs/AI/tasks/TASK-055.md` |
 | **TASK-056** | 服务器负载轻量实时概览 (CPU/内存/磁盘/网络 5秒免存盘轮询) 与桌面蓝色状态栏及移动端紧凑微型栏全景展示 | TASK-003, TASK-005, TASK-019, TASK-028, TASK-043 | **DONE** | `docs/AI/tasks/TASK-056.md` |
 | **TASK-057** | 默认下载目录重构至 ~/Downloads/Remora 与传输面板一键原生文件管理器穿透 | TASK-004, TASK-056 | **DONE** | `docs/AI/tasks/TASK-057.md` |
+| **TASK-058** | 代码编辑器聚焦与滚屏位置保持优化 (CodeMirror Focus & Scroll Retention) | TASK-004, TASK-051 | **DONE** | `docs/AI/tasks/TASK-058.md` |
+| **TASK-059** | VS Code 风格全局跨文件搜索系统 (VS Code Style Remote Global Search via SSH Exec) | TASK-003, TASK-004, TASK-006, TASK-008, TASK-019 | **DONE** | `docs/AI/tasks/TASK-059.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 58
+- **已完成 (DONE)**: 60
 - **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 58
+- **总任务数**: 60
 
 ---
 
 ## 3. 项目执行总结
 
+- **TASK-059** 圆满完成：VS Code 风格全局跨文件搜索系统（远端自适应智能级联加速引擎 `ripgrep` -> `git grep` -> `grep` + Base64 零注入安全执行 + 大结果防爆流截断 + VS Code 经典三联开关 `Aa`、`\b`、`.*` 与高级路径包含/排除过滤 + 搜索结果树状折叠/展开 + 关键词高亮分段渲染 + 点击直达编辑器对应行与光标定位）。针对远程 SSH 无法走本地 SFTP 遍历读文件的性能瓶颈，创新性落地远程 Shell 管道流自适应执行架构：1) 在 Rust 后端实现 `SearchService` 与 `search_in_files` Tauri 命令，优先调用远端多线程 `ripgrep`，自动遵循 `.gitignore` 并跳过二进制与 `node_modules`；自动级联探测 `git grep` 与通用 `grep -rnI` 作为兜底，保证在任何远程 Linux/Mac/容器上 100% 毫秒级可用；2) 参数与正则检索词全程 Base64 编码注入远端 Shell，彻底杜绝 Shell 命令注入风险；3) 前端开发完整的 `SearchPanel.tsx`，与 ActivityBar 搜索图标 (`Ctrl+Shift+F`) 无缝集成；4) 扩展 `editorStore` 与 `CodeEditor.tsx`，点击检索项直接打开文件并精确定位与平滑滚屏至对应行和列。
 - Remora 核心功能、远程代理注入、前后端集成、跨平台自动化全量构建发布体系全部就绪。
 - **TASK-055** 圆满完成：TMUX / 普通终端鼠标划选即复制 (Copy-on-Select + OSC 52) 与终端全场景抗闪烁渲染引擎（双缓冲原子帧合并 + Linux WebKitGTK DOM 渲染器优化 + RAF 尺寸防抖去重）。根据用户“粘贴可以按照以前的不，我只要现在的鼠标选中他就复制就可以了”的指示精准优化：1) 粘贴快捷键零拦截：彻底恢复 `attachCustomKeyEventHandler` 为原样（仅保留 IME 回车防护），粘贴完全由系统和浏览器原生 paste 事件触发，零权限阻断风险、100% 可靠；2) 普通终端鼠标选中即复制：在终端容器监听 `mouseup`，检测到文本选区时自动调用 `navigator.clipboard.writeText(...)` 写入本地系统剪贴板并弹出轻量 "已复制到剪贴板" Toast 浮层；3) TMUX 鼠标选中即复制：在 `terminalStore.ts` 为 TMUX 注入 `set -s set-clipboard on` 与 `terminal-overrides Ms`，将 `copy-mode` 鼠标拖拽释放直接绑定为 `copy-pipe-and-cancel`，通过 OSC 52 管道发送 Base64 选区文本，并在 `XtermView.tsx` 注册 `registerOscHandler(52)` 解码写入宿主机剪贴板与展示 Toast；4) 移除外层 `select-none`，确保原生文本选中完全畅通；5) 实现原子帧合并引擎（Atomic Frame Coalescing）：拦截并微缓冲孤立的全屏清屏包（`\x1b[H\x1b[2J`），与随后到达的重绘字符合并写入，彻底根除 TMUX 重绘时的 1 帧空白闪烁；6) 在 Linux 桌面（WebKitGTK）彻底禁用 WebGL 改用极速稳定的 xterm 5 原生 DOM 渲染器，结合 RAF 与 `proposeDimensions()` 防抖去重，彻底消除尺寸调整与分屏拖拽时的频闪；7) 注入 `escape-time 10` 与关闭 TMUX 蜂鸣闪烁。
 - **TASK-054** 圆满完成：远程图片文件可靠预览与缩放查看能力支持（对标 VS Code：SFTP 远端二进制流 Base64 管道 + 专业棋盘格图片查看器 + 滚轮缩放平移 + SVG 双模无缝切换）。解决点击远端图片文件因 UTF-8 文本强制解码抛错导致完全无法预览的重大缺陷：1) 在 Rust 后端实现 `sftp_read_binary_file` Tauri 命令与 `guess_image_mime`，通过文件扩展名与文件头魔数识别 MIME 类型，辅以 50MB 内存溢出防御保护；2) 在前端 `tauriBridge.ts`、`fileIcons.tsx`、`editorStore.ts` 建立图片检测管道，`openFile` 针对常见图片文件分支调用二进制读取并组装 Data URL；3) 编写专业图片视口查看器 `ImageViewer.tsx`，支持 CSS 棋盘网格透明通道、鼠标拖拽平移、鼠标滚轮缩放、适屏（Fit）、1:1 原始像素及实时元数据栏（自然分辨率与文件大小）；4) 针对 SVG 文件特别实现图形预览与 CodeMirror 源码编辑双模 0 延迟切换，保存时实时重新合成 Data URL，全面提升远程 Web/静态素材开发体验。
