@@ -5,63 +5,68 @@
 ---
 
 ## 当前目标与任务
-- **当前 Goal**: TMUX 剪贴板全链路打通 (OSC 52 + 鼠标选中即复制) 与终端全场景抗闪烁渲染引擎优化
+- **当前 Goal**: 服务器负载轻量实时概览 (CPU/内存/磁盘/网络 5秒免存盘轮询) 与桌面蓝色状态栏及移动端紧凑微型栏全景展示
 - **当前 Task**: 
-  - TASK-055: TMUX / 普通终端鼠标划选即复制 (Copy-on-Select + OSC 52) 与终端全场景抗闪烁渲染引擎 (Atomic Coalescing & Clean DOM Renderer) [DONE]
-- **当前状态**: DONE (所有验收标准全部满足，28 项前后端测试 100% 通过)
+  - TASK-056: 服务器负载轻量实时概览 (CPU/内存/磁盘/网络 5秒免存盘轮询) 与桌面蓝色状态栏及移动端紧凑微型栏全景展示 [DONE]
+- **当前状态**: DONE (所有验收标准全部满足，29 项前后端测试 100% 通过，生产打包 0 错误)
 
 ---
 
 ## 2. 本次会话完成内容
 
-1. **TMUX / 普通终端鼠标划选即复制 (TASK-055)**:
-   - **根本成因与用户体验诉求**:
-     1. TMUX 开启鼠标支持后，用户拖拽被 TMUX copy-mode 捕获，释放鼠标后默认清空选中；且未开启 `set-clipboard on`，复制内容无法发送到宿主机；
-     2. 前端 xterm 未实现 OSC 52 协议逃逸码，即使收到剪贴板数据也直接丢弃；
-     3. 用户明确要求：“粘贴可以按照以前的不，我只要现在的鼠标选中他就复制就可以了”。
-   - **原生粘贴零拦截保持 (`src/components/Terminal/XtermView.tsx`)**:
-     - `term.attachCustomKeyEventHandler` 彻底恢复为仅保留输入法合成（IME Composing）状态下回车键的防护，绝不拦截任何键盘粘贴或复制快捷键（如 `Ctrl+V`、`Cmd+V`、`Ctrl+Shift+V` 等）；
-     - 宿主系统/浏览器的原生 `paste` 事件自然由 xterm 内置 `<textarea>` 捕获并注入终端，零权限风险、与以前表现完全一致。
-   - **双轨鼠标划选即复制 (Copy-on-Select)**:
-     - **普通终端会话 / TMUX+Shift**: 在终端容器监听 `mouseup` 事件，检测到 `term.hasSelection()` 时，自动读取选区文本并通过 `navigator.clipboard.writeText(...)` 写入本地系统剪贴板，并触发轻量 "已复制到剪贴板" Toast 提示；
-     - **TMUX 会话**: 在 `TMUX_SETUP_AND_ATTACH` 中加入 `tmux set -s set-clipboard on` 与 `tmux set -as terminal-overrides ',*:Ms=\\E]52;%p1%s;%p2%s\\007'`，并将 `copy-mode` 拖拽释放绑定为 `copy-pipe-and-cancel`；前端注册 `term.parser.registerOscHandler(52, ...)` 安全解码 Base64 文本并写入宿主机剪贴板，同步弹出 Toast 提示。
-   - **容器样式解禁 (`src/components/Terminal/TerminalPanel.tsx`)**:
-     - 移除外层包裹容器上的 `select-none`，确保原生文本选中完全畅通。
+1. **后端极速 POSIX 原生探针与差值计算 (`src-tauri/src/overview/`)**:
+   - 构造无外部依赖的标准单行 POSIX Shell 探针（通过 `exec_command` 执行，耗时仅 ~20ms），读取 `/proc/stat`、`/proc/meminfo`、`df -Pk /`、`/proc/net/dev`、`/proc/loadavg`、`/proc/uptime` 与 CPU 核心数；针对 macOS 提供 `sysctl` / `vm_stat` 兼容回退；
+   - 在内存中以 `PrevSample` 缓存上一轮采样的 `cpu_total`、`cpu_idle`、`net_rx_bytes`、`net_tx_bytes` 及时间戳，基于两次采样之差（Delta）精确计算出瞬时 CPU 使用率（0-100%）与实时网络上下行速率（Bytes/s）；
+   - **严格免存盘**: 采集数据纯在内存流转，绝不写入本地 SQLite 数据库，避免无意义的磁盘 I/O；服务器断开时自动调用 `clear_cache` 彻底释放内存；
+   - 暴露 Tauri 命令 `get_server_overview(server_id: String) -> Result<ServerOverview>`。
 
-2. **终端全场景抗闪烁渲染引擎 (TASK-055)**:
-   - **双缓冲原子帧合并 (Atomic Frame Coalescing)**:
-     - 监听输入数据流，当检测到全屏清屏序列（`\x1b[H\x1b[2J`、`\x1b[2J`、`\x1b[?1049h`）且处于独立小数据包时，使用 10ms 微任务暂存，与随后紧邻到达的屏幕重绘文字帧合并后一次性传给 `term.write()`，彻底消除“先清屏成黑底、再绘制文字”产生的 1 帧空白闪烁。
-   - **Linux 桌面 WebKitGTK 渲染器优化**:
-     - 识别 Linux 桌面环境与移动端，彻底停用 `@xterm/addon-webgl`，全面采用高性能原生 DOM 渲染器，根除 WebKitGTK 下 WebGL 画布重置引起的黑/白闪烁。
-   - **尺寸防抖与去重**:
-     - 在 `ResizeObserver` 中使用 `fitAddon.proposeDimensions()` 预计算目标行列，尺寸未变直接跳过 `fit()` 与 `term.resize`；分屏拖拽时使用 `requestAnimationFrame` 进行帧合并防抖；容器宽高未初始化时不执行 `fit()`。
-   - **消除 TMUX 延迟与蜂鸣**:
-     - 配置 `tmux set -s escape-time 10`、`tmux set -g bell-action none` 与 `tmux set -g visual-bell off`。
+2. **前端 5 秒智能轮询与节能挂起机制 (`src/stores/serverOverviewStore.ts`)**:
+   - 严格实现 5 秒采集一次的定时器；
+   - 监听 `document.visibilityState`：移动端切后台或桌面端最小化时自动挂起 5 秒轮询，消除后台耗电与 SSH 远程流量消耗；回到前台立刻唤醒并即刻执行一次刷新；
+   - 联动 `App.tsx`：当连接断开或切换服务器时，自动启停轮询并清理状态。
+
+3. **桌面端蓝色状态栏全功能展示 (`src/components/StatusBar/StatusBar.tsx`)**:
+   - 在底部蓝色状态栏加入四合一负载监控胶囊：
+     - `CPU xx%` (带 CPU 芯片图标)
+     - `MEM xx%` (带内存图标)
+     - `DISK xx%` (带磁盘图标)
+     - `↓xxKB/s ↑xxKB/s` (带网络活动图标)
+   - 当负载超过 85% 时，字体自动加粗并呈现警示高亮色；
+   - 悬停展示包含 CPU 核心数、系统 1m/5m/15m Load Avg、已用/总内存、已用/总磁盘及系统运行时间的详尽 Tooltip；
+   - 点击可唤出全景概览模态框。
+
+4. **移动端窄屏极限空间解法 (`MobileOverviewBar.tsx` + `ServerOverviewModal.tsx`)**:
+   - **22px 微型常驻负载条 (`MobileOverviewBar`)**:
+     - 针对手机端窄屏与垂直空间敏感的痛点，将概览条停靠在 `MobileTabBar` 正上方，高度仅 22px；
+     - 紧凑展示 `CPU 15% · MEM 42% · DISK 58% · ↓18K ↑4K`；
+     - 支持轻点一键折叠为右下角极简悬浮气泡（`[C:15% M:42% ▾]`），确保 100% 不干扰软键盘打字与终端操作。
+   - **全景负载抽屉浮层 (`ServerOverviewModal`)**:
+     - 手机端从底部平滑滑出 Bottom Sheet，桌面端居中弹窗；
+     - 清晰呈现 CPU 使用率进度条、核心数、Load Avg；系统内存已用/总计；磁盘已用/容量与挂载点；实时下行/上行测速卡片；以及服务器启动运行时间。
 
 ---
 
 ## 3. 修改与创建的文件
 - **新建文件**:
-  - `docs/AI/tasks/TASK-055.md`
+  - `docs/AI/tasks/TASK-056.md`
+  - `src-tauri/src/overview/mod.rs`
+  - `src-tauri/src/overview/service.rs`
+  - `src/stores/serverOverviewStore.ts`
+  - `src/components/Layout/MobileOverviewBar.tsx`
+  - `src/components/StatusBar/ServerOverviewModal.tsx`
 - **修改文件**:
-  - `src/stores/terminalStore.ts`
-  - `src/components/Terminal/XtermView.tsx`
-  - `src/components/Terminal/TerminalPanel.tsx`
+  - `src-tauri/src/core/types.rs`
+  - `src-tauri/src/lib.rs`
+  - `src/utils/tauriBridge.ts`
+  - `src/components/StatusBar/StatusBar.tsx`
+  - `src/App.tsx`
   - `docs/AI/TASK_INDEX.md`
   - `docs/AI/SESSION_STATE.md`
 
 ---
 
 ## 4. 已运行的验证命令及结果
-- `cargo check --manifest-path src-tauri/Cargo.toml`: 0 警告 / 0 错误编译通过（耗时 8.81s）。
-- `cargo test --manifest-path src-tauri/Cargo.toml`: 27 个单元测试 + 1 个 E2E 集成测试全量 100% 通过（耗时 0.01s）。
+- `cargo check --manifest-path src-tauri/Cargo.toml`: 0 警告 / 0 错误通过（耗时 2.08s）。
+- `cargo test --manifest-path src-tauri/Cargo.toml`: 28 个单元测试（含新增的 `test_parse_linux_probe_and_delta` 差值计算与多网卡解析测试）+ 1 个 E2E 集成测试全量 100% 通过（耗时 0.03s）。
 - `pnpm tsc --noEmit`: 前端 TypeScript 严格检查 0 报错。
-- `pnpm build`: Vite 前端生产打包顺利通过（7.77s，0 语法/类型错误）。
-
----
-
-## 5. 承诺与约束说明
-- **严格遵循用户指示**:
-  1. 粘贴键完全保留以前原生方式，不拦截任何粘贴快捷键；
-  2. 仅实现鼠标选中即自动复制；
-  3. 本地 Release 构建与 Actions 发布完全交由用户自己执行，AI 代理不执行 `./build.sh`。
+- `pnpm build`: Vite 前端生产打包顺利通过（耗时 8.35s，0 语法/类型错误）。

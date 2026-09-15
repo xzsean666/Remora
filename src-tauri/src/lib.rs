@@ -1,5 +1,6 @@
 pub mod connection;
 pub mod core;
+pub mod overview;
 pub mod security;
 pub mod sftp;
 pub mod storage;
@@ -11,8 +12,9 @@ use tauri::{Emitter, Manager, State};
 use crate::connection::{ConnectionManager, ConnectionState};
 use crate::core::{
     AppError, AuthType, FileEntry, LayoutPreferences, QuickSnippet, ReadBinaryFileResult, ReadFileResult, RecentProject, Result,
-    ServerConfig, SshKey, WriteFileResult,
+    ServerConfig, ServerOverview, SshKey, WriteFileResult,
 };
+use crate::overview::OverviewService;
 use crate::security::KeyringService;
 use crate::sftp::SftpService;
 use crate::storage::StorageService;
@@ -26,6 +28,7 @@ pub struct AppState {
     pub sftp: Arc<SftpService>,
     pub terminal: TerminalManager,
     pub transfer: TransferManager,
+    pub overview: Arc<OverviewService>,
 }
 
 #[tauri::command]
@@ -241,6 +244,7 @@ async fn disconnect_server(
 ) -> Result<()> {
     state.terminal.close_all_for_server(&server_id).await;
     state.sftp.close_session(&server_id).await;
+    state.overview.clear_cache(&server_id).await;
     let res = state.connection.disconnect(&server_id).await;
 
     let _ = app.emit("connection-state-changed", serde_json::json!({
@@ -963,6 +967,16 @@ async fn git_get_diff(
     Ok(output)
 }
 
+// --- Server Overview Command ---
+
+#[tauri::command]
+async fn get_server_overview(
+    server_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<ServerOverview> {
+    state.overview.get_overview(&server_id).await
+}
+
 // --- Window & Lifecycle Commands ---
 
 pub fn open_new_window(app: &tauri::AppHandle) -> Result<()> {
@@ -1126,6 +1140,7 @@ pub fn run() {
             let sftp = Arc::new(SftpService::new(connection.clone()));
             let terminal = TerminalManager::new(connection.clone());
             let transfer = TransferManager::new(sftp.clone());
+            let overview = Arc::new(OverviewService::new(connection.clone()));
 
             let app_state = Arc::new(AppState {
                 storage,
@@ -1134,6 +1149,7 @@ pub fn run() {
                 sftp,
                 terminal,
                 transfer,
+                overview,
             });
 
             app.manage(app_state);
@@ -1192,7 +1208,8 @@ pub fn run() {
             tmux_new_session,
             git_get_status,
             git_checkout,
-            git_get_diff
+            git_get_diff,
+            get_server_overview
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

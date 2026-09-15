@@ -10,12 +10,15 @@ import { TerminalPanel } from "./components/Terminal/TerminalPanel";
 import { TransferPanel } from "./components/Sidebar/TransferManager/TransferPanel";
 import { QuickInputPanel } from "./components/Sidebar/QuickInput/QuickInputPanel";
 import { MobileTabBar } from "./components/Layout/MobileTabBar";
+import { MobileOverviewBar } from "./components/Layout/MobileOverviewBar";
+import { ServerOverviewModal } from "./components/StatusBar/ServerOverviewModal";
 import { GitPanel } from "./components/Sidebar/Git/GitPanel";
 import { useLayoutStore } from "./stores/layoutStore";
 import { useEditorStore } from "./stores/editorStore";
 import { useFileTreeStore } from "./stores/fileTreeStore";
 import { useConnectionStore } from "./stores/connectionStore";
 import { useTerminalStore } from "./stores/terminalStore";
+import { useServerOverviewStore } from "./stores/serverOverviewStore";
 import {
   createNewWindow,
   checkUpdate,
@@ -136,6 +139,12 @@ export default function App() {
         // Refresh directory tree to reflect remote state and recover any broken folder views
         refreshPath(rootPath).catch(() => {});
       }
+
+      // 3. Refresh server overview if connected
+      const connState = useConnectionStore.getState();
+      if (connState.activeServerId && connState.status === "connected") {
+        useServerOverviewStore.getState().fetchOverview(connState.activeServerId, true);
+      }
     };
 
     const handleVisibilityChange = () => {
@@ -172,6 +181,17 @@ export default function App() {
       clearTimeout(timer);
     };
   }, [initFromPreferences, initListener, initTerminalListener, loadRecentProjects, setIsMobile, toggleSidebarTab]);
+
+  const { status: connStatus, activeServerId } = useConnectionStore();
+
+  // Manage server overview 5s polling based on active connection status
+  useEffect(() => {
+    if (connStatus === "connected" && activeServerId) {
+      useServerOverviewStore.getState().startPolling(activeServerId);
+    } else {
+      useServerOverviewStore.getState().stopPolling();
+    }
+  }, [connStatus, activeServerId]);
 
   const renderSidebarContent = () => (
     <SidebarContainer>
@@ -360,11 +380,17 @@ export default function App() {
         </div>
       )}
 
+      {/* Mobile Overview Micro Bar */}
+      {isMobile && <MobileOverviewBar />}
+
       {/* Mobile Navigation Tab Bar */}
       {isMobile && <MobileTabBar />}
 
       {/* Bottom Status Bar (Desktop only to prevent duplicate bars on mobile) */}
       {!isMobile && <StatusBar activePath={rootPath || undefined} />}
+
+      {/* Server Overview Details Modal / Bottom Sheet */}
+      <ServerOverviewModal />
     </div>
   );
 }

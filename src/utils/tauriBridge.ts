@@ -546,6 +546,25 @@ export async function safeInvoke<T = any>(cmd: string, args?: Record<string, any
       }
       return undefined as unknown as T;
     }
+    case "get_server_overview": {
+      const mockOverview: ServerOverview = {
+        cpu_usage: 12.8,
+        cpu_cores: 8,
+        load_avg: [0.35, 0.42, 0.51],
+        mem_total: 16 * 1024 * 1024 * 1024,
+        mem_used: 6.8 * 1024 * 1024 * 1024,
+        mem_usage: 42.5,
+        disk_total: 120 * 1024 * 1024 * 1024,
+        disk_used: 48 * 1024 * 1024 * 1024,
+        disk_usage: 40.0,
+        disk_mount: "/",
+        net_rx_speed: 128 * 1024,
+        net_tx_speed: 45 * 1024,
+        uptime_seconds: 345600,
+        timestamp: Date.now(),
+      };
+      return mockOverview as unknown as T;
+    }
     default: {
       throw new Error(
         `Command "${cmd}" requires Tauri desktop runtime. Please run Remora with "pnpm tauri dev".`
@@ -768,5 +787,67 @@ export async function getGitDiff(
   filePath: string
 ): Promise<string> {
   return await safeInvoke<string>("git_get_diff", { serverId, repoPath, filePath });
+}
+
+export interface ServerOverview {
+  cpu_usage: number;
+  cpu_cores: number;
+  load_avg: [number, number, number];
+  mem_total: number;
+  mem_used: number;
+  mem_usage: number;
+  disk_total: number;
+  disk_used: number;
+  disk_usage: number;
+  disk_mount: string;
+  net_rx_speed: number;
+  net_tx_speed: number;
+  uptime_seconds: number;
+  timestamp: number;
+}
+
+export async function getServerOverview(serverId: string): Promise<ServerOverview> {
+  return await safeInvoke<ServerOverview>("get_server_overview", { serverId });
+}
+
+export function formatBytes(bytes: number, decimals = 1): string {
+  if (!bytes || bytes <= 0) return "0 B";
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ["B", "KB", "MB", "GB", "TB", "PB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  if (i >= sizes.length) return (bytes / Math.pow(k, sizes.length - 1)).toFixed(dm) + " " + sizes[sizes.length - 1];
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + " " + sizes[i];
+}
+
+export function formatSpeed(bytesPerSec: number): string {
+  if (!bytesPerSec || bytesPerSec <= 0) return "0 B/s";
+  if (bytesPerSec < 1024) return `${bytesPerSec} B/s`;
+  if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+  if (bytesPerSec < 1024 * 1024 * 1024) return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+  return `${(bytesPerSec / (1024 * 1024 * 1024)).toFixed(1)} GB/s`;
+}
+
+export function formatSpeedCompact(bytesPerSec: number): string {
+  if (!bytesPerSec || bytesPerSec <= 0) return "0B";
+  if (bytesPerSec < 1024) return `${bytesPerSec}B`;
+  if (bytesPerSec < 1024 * 1024) return `${Math.round(bytesPerSec / 1024)}K`;
+  if (bytesPerSec < 1024 * 1024 * 1024) return `${(bytesPerSec / (1024 * 1024)).toFixed(1)}M`;
+  return `${(bytesPerSec / (1024 * 1024 * 1024)).toFixed(1)}G`;
+}
+
+export function formatUptime(seconds: number): string {
+  if (!seconds || seconds <= 0) return "刚刚启动";
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+
+  if (days > 0) {
+    return `${days}天 ${hours}小时`;
+  }
+  if (hours > 0) {
+    return `${hours}小时 ${minutes}分`;
+  }
+  return `${minutes}分钟`;
 }
 

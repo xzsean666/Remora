@@ -1,9 +1,11 @@
 import React from "react";
-import { Terminal, Wifi, WifiOff, Folder, RefreshCw, AlertCircle, Code2, GitBranch } from "lucide-react";
+import { Terminal, Wifi, WifiOff, Folder, RefreshCw, AlertCircle, Code2, GitBranch, Cpu, HardDrive, Database, Activity } from "lucide-react";
 import { useLayoutStore } from "../../stores/layoutStore";
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useEditorStore } from "../../stores/editorStore";
 import { useGitStore } from "../../stores/gitStore";
+import { useServerOverviewStore } from "../../stores/serverOverviewStore";
+import { formatBytes, formatSpeedCompact, formatUptime } from "../../utils/tauriBridge";
 import { languages } from "@codemirror/language-data";
 import { LanguageDescription } from "@codemirror/language";
 
@@ -21,6 +23,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({ activePath }) => {
     reconnect,
     getConnectedServerIds,
   } = useConnectionStore();
+  const { overview, setIsModalOpen } = useServerOverviewStore();
   const { tabs, activeTabPath } = useEditorStore();
   const { isRepo, currentBranch, changes } = useGitStore();
   const activeTab = tabs.find((t) => t.path === activeTabPath);
@@ -152,6 +155,47 @@ export const StatusBar: React.FC<StatusBarProps> = ({ activePath }) => {
       </div>
 
       <div className="flex items-center gap-3 flex-shrink-0">
+        {/* Server Load Overview Item (CPU, MEM, DISK, NET) */}
+        {status === "connected" && overview && (
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center gap-2.5 px-2 py-0.5 rounded hover:bg-white/10 cursor-pointer transition-colors text-slate-100 hover:text-white font-mono text-[11px] flex-shrink-0"
+            title={`服务器负载概览 (点击查看全景大图)\n---------------------------\nCPU: ${overview.cpu_usage.toFixed(1)}% (${overview.cpu_cores} 核心, 负载: ${overview.load_avg.map((v) => v.toFixed(2)).join(", ")})\n内存: ${formatBytes(overview.mem_used)} / ${formatBytes(overview.mem_total)} (${overview.mem_usage.toFixed(1)}%)\n磁盘: ${formatBytes(overview.disk_used)} / ${formatBytes(overview.disk_total)} (${overview.disk_usage.toFixed(1)}%)\n网络: ↓${formatSpeedCompact(overview.net_rx_speed)}/s ↑${formatSpeedCompact(overview.net_tx_speed)}/s\n运行时间: ${formatUptime(overview.uptime_seconds)}\n---------------------------\n每 5 秒无感采集 · 免持久化存盘`}
+          >
+            {/* CPU */}
+            <div className="flex items-center gap-1">
+              <Cpu className="w-3.5 h-3.5 text-sky-300 flex-shrink-0" />
+              <span className={overview.cpu_usage >= 85 ? "text-rose-300 font-bold" : ""}>
+                CPU {overview.cpu_usage.toFixed(0)}%
+              </span>
+            </div>
+
+            {/* Memory */}
+            <div className="flex items-center gap-1">
+              <HardDrive className="w-3.5 h-3.5 text-indigo-300 flex-shrink-0" />
+              <span className={overview.mem_usage >= 85 ? "text-rose-300 font-bold" : ""}>
+                MEM {overview.mem_usage.toFixed(0)}%
+              </span>
+            </div>
+
+            {/* Disk */}
+            <div className="flex items-center gap-1">
+              <Database className="w-3.5 h-3.5 text-amber-300 flex-shrink-0" />
+              <span className={overview.disk_usage >= 85 ? "text-rose-300 font-bold" : ""}>
+                DISK {overview.disk_usage.toFixed(0)}%
+              </span>
+            </div>
+
+            {/* Network */}
+            <div className="flex items-center gap-1">
+              <Activity className="w-3.5 h-3.5 text-emerald-300 flex-shrink-0" />
+              <span className="text-emerald-200">
+                ↓{formatSpeedCompact(overview.net_rx_speed)} ↑{formatSpeedCompact(overview.net_tx_speed)}
+              </span>
+            </div>
+          </button>
+        )}
+
         {/* Terminal toggle */}
         <button
           onClick={toggleTerminal}

@@ -126,4 +126,22 @@ pub struct SshKey {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ServerOverview {
+    pub cpu_usage: f32,
+    pub cpu_cores: u32,
+    pub load_avg: [f32; 3],
+    pub mem_total: u64,
+    pub mem_used: u64,
+    pub mem_usage: f32,
+    pub disk_total: u64,
+    pub disk_used: u64,
+    pub disk_usage: f32,
+    pub disk_mount: String,
+    pub net_rx_speed: u64,
+    pub net_tx_speed: u64,
+    pub uptime_seconds: u64,
+    pub timestamp: u64,
+}
+
 
