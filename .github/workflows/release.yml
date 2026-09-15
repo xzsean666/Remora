@@ -31,14 +31,11 @@ jobs:
       matrix:
         include:
           - platform: 'ubuntu-22.04'
-            args: '--bundles deb,appimage'
+            args: '--bundles deb'
             target: 'x86_64-unknown-linux-gnu'
           - platform: 'windows-latest'
             args: '--bundles msi,nsis'
             target: 'x86_64-pc-windows-msvc'
-          - platform: 'macos-latest'
-            args: '--bundles dmg'
-            target: 'aarch64-apple-darwin,x86_64-apple-darwin'
 
     runs-on: ${{ matrix.platform }}
     outputs:
@@ -68,7 +65,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'pnpm'
 
       - name: Install Rust stable
@@ -99,7 +96,10 @@ jobs:
           tagName: ${{ steps.vars.outputs.tag }}
           releaseName: 'Remora ${{ steps.vars.outputs.tag }}'
           releaseBody: |
-            See the assets below to download and install Remora across all supported platforms (Linux, Windows, macOS, Android).
+            See the assets below to download and install Remora across supported platforms (Windows, Linux DEB, Android).
+            
+            ### Windows (x64):
+            Download the NSIS setup installer (`remora_*_x64-setup.exe`) or Windows Installer (`remora_*_x64_en-US.msi`) and run to install.
             
             ### Linux (Ubuntu / Debian):
             ```bash
@@ -107,18 +107,6 @@ jobs:
             # or
             sudo apt install ./remora_*_amd64.deb
             ```
-            
-            ### Linux (Universal AppImage):
-            ```bash
-            chmod +x remora_*.AppImage
-            ./remora_*.AppImage
-            ```
-            
-            ### Windows (x64):
-            Download the NSIS setup installer (`remora_*_x64-setup.exe`) or Windows Installer (`remora_*_x64_en-US.msi`) and run to install.
-            
-            ### macOS (Apple Silicon & Intel):
-            Download the Apple Disk Image (`remora_*_universal.dmg` or `remora_*_aarch64.dmg`), open it, and drag Remora to Applications.
             
             ### Mobile Android (手机端):
             Download the Android APK (`remora-*-v*.apk`) directly to your mobile device and tap to install.
@@ -157,7 +145,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'pnpm'
 
       - name: Install Rust stable
