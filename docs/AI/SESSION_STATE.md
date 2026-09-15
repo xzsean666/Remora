@@ -39,6 +39,11 @@
    - 在 ActivityBar 顶部导航增加放大镜搜索图标（`Ctrl+Shift+F`），位于 Explorer 与 Git 之间；
    - 全局监听 `Ctrl+Shift+F` / `Cmd+Shift+F` 呼出搜索侧栏并自动聚焦搜索输入框。
 
+5. **Release 流水线默认目标调整 (`.github/workflows/release.yml`)**:
+   - 调整 GitHub Actions Release 流水线，以后默认仅构建 **Windows (MSI/NSIS)**、**Linux DEB** 以及 **Android APK** 三大主流产物；
+   - 移除 macOS DMG 与 AppImage 编译矩阵，更新 Node.js 至 22 LTS；
+   - 触发并监控运行 Run ID: `34960424290`。
+
 ---
 
 ## 3. 修改与创建的文件
