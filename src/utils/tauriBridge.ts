@@ -576,6 +576,39 @@ export async function safeInvoke<T = any>(cmd: string, args?: Record<string, any
       };
       return mockOverview as unknown as T;
     }
+    case "gh_get_auth_status": {
+      const mockGh: GhAuthStatus = {
+        is_installed: true,
+        active_account: "xzsean666",
+        accounts: ["xzsean666", "0xcube-666"],
+        error: null,
+      };
+      return mockGh as unknown as T;
+    }
+    case "gh_switch_account": {
+      const mockGh: GhAuthStatus = {
+        is_installed: true,
+        active_account: (args?.username as string) || "xzsean666",
+        accounts: ["xzsean666", "0xcube-666"],
+        error: null,
+      };
+      return mockGh as unknown as T;
+    }
+    case "git_commit": {
+      return `[main 7f8a9b] ${args?.message || "commit"}` as unknown as T;
+    }
+    case "git_push": {
+      return "Everything up-to-date" as unknown as T;
+    }
+    case "git_pull": {
+      return "Already up to date." as unknown as T;
+    }
+    case "git_sync": {
+      return "Sync completed successfully." as unknown as T;
+    }
+    case "git_get_summary_diff": {
+      return "===STATUS===\n M src/components/Sidebar/Git/GitPanel.tsx\n===DIFF===\n+ // git panel updated" as unknown as T;
+    }
     default: {
       throw new Error(
         `Command "${cmd}" requires Tauri desktop runtime. Please run Remora with "pnpm tauri dev".`
@@ -798,6 +831,51 @@ export async function getGitDiff(
   filePath: string
 ): Promise<string> {
   return await safeInvoke<string>("git_get_diff", { serverId, repoPath, filePath });
+}
+
+export interface GhAuthStatus {
+  is_installed: boolean;
+  active_account: string | null;
+  accounts: string[];
+  error?: string | null;
+}
+
+export async function getGhAuthStatus(serverId: string): Promise<GhAuthStatus> {
+  return await safeInvoke<GhAuthStatus>("gh_get_auth_status", { serverId });
+}
+
+export async function switchGhAccount(serverId: string, username: string): Promise<GhAuthStatus> {
+  return await safeInvoke<GhAuthStatus>("gh_switch_account", { serverId, username });
+}
+
+export async function gitCommit(
+  serverId: string,
+  repoPath: string,
+  message: string,
+  stageAll: boolean = true
+): Promise<string> {
+  return await safeInvoke<string>("git_commit", {
+    serverId,
+    repoPath,
+    message,
+    stageAll,
+  });
+}
+
+export async function gitPush(serverId: string, repoPath: string): Promise<string> {
+  return await safeInvoke<string>("git_push", { serverId, repoPath });
+}
+
+export async function gitPull(serverId: string, repoPath: string): Promise<string> {
+  return await safeInvoke<string>("git_pull", { serverId, repoPath });
+}
+
+export async function gitSync(serverId: string, repoPath: string): Promise<string> {
+  return await safeInvoke<string>("git_sync", { serverId, repoPath });
+}
+
+export async function gitGetSummaryDiff(serverId: string, repoPath: string): Promise<string> {
+  return await safeInvoke<string>("git_get_summary_diff", { serverId, repoPath });
 }
 
 export interface ServerOverview {

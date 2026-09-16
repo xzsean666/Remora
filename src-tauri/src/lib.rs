@@ -1001,6 +1001,116 @@ async fn git_checkout(
     Ok(output)
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct GhAuthStatus {
+    pub is_installed: bool,
+    pub active_account: Option<String>,
+    pub accounts: Vec<String>,
+    pub error: Option<String>,
+}
+
+pub fn parse_gh_auth_status(output: &str) -> GhAuthStatus {
+    let lower = output.to_lowercase();
+    if lower.contains("command not found") || lower.contains("not found") || lower.contains("no such file") {
+        return GhAuthStatus {
+            is_installed: false,
+            active_account: None,
+            accounts: Vec::new(),
+            error: Some("GitHub CLI (gh) 未在远端服务器安装".to_string()),
+        };
+    }
+
+    let mut accounts = Vec::new();
+    let mut active_account = None;
+    let mut current_account: Option<String> = None;
+
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if let Some(pos) = trimmed.find("account ") {
+            let rest = &trimmed[pos + 8..];
+            let username = rest
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .trim_matches('(')
+                .trim_matches(')')
+                .trim_matches('\'')
+                .trim_matches('"');
+            if !username.is_empty() {
+                let user_str = username.to_string();
+                if !accounts.contains(&user_str) {
+                    accounts.push(user_str.clone());
+                }
+                current_account = Some(user_str);
+            }
+        }
+
+        if trimmed.contains("Active account: true") {
+            if let Some(ref cur) = current_account {
+                active_account = Some(cur.clone());
+            }
+        }
+    }
+
+    if active_account.is_none() && accounts.len() == 1 {
+        active_account = Some(accounts[0].clone());
+    }
+
+    GhAuthStatus {
+        is_installed: true,
+        active_account,
+        accounts,
+        error: None,
+    }
+}
+
+#[tauri::command]
+async fn gh_get_auth_status(
+    server_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<GhAuthStatus> {
+    let output = match state
+        .connection
+        .exec_command_with_timeout(&server_id, "gh auth status 2>&1", std::time::Duration::from_secs(10))
+        .await
+    {
+        Ok(out) => out,
+        Err(e) => {
+            return Ok(GhAuthStatus {
+                is_installed: false,
+                active_account: None,
+                accounts: Vec::new(),
+                error: Some(e.to_string()),
+            });
+        }
+    };
+
+    Ok(parse_gh_auth_status(&output))
+}
+
+#[tauri::command]
+async fn gh_switch_account(
+    server_id: String,
+    username: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<GhAuthStatus> {
+    let safe_username: String = username
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
+        .collect();
+    if safe_username.is_empty() {
+        return Err(AppError::InvalidArgument("Invalid GitHub username".to_string()));
+    }
+
+    let cmd = format!("gh auth switch --user \"{}\" 2>&1", safe_username);
+    let _ = state
+        .connection
+        .exec_command_with_timeout(&server_id, &cmd, std::time::Duration::from_secs(10))
+        .await?;
+
+    gh_get_auth_status(server_id, state).await
+}
+
 #[tauri::command]
 async fn git_get_diff(
     server_id: String,
@@ -1016,6 +1126,112 @@ async fn git_get_diff(
     );
 
     let output = state.connection.exec_command(&server_id, &cmd).await?;
+    Ok(output)
+}
+
+#[tauri::command]
+async fn git_commit(
+    server_id: String,
+    repo_path: String,
+    message: String,
+    stage_all: Option<bool>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<String> {
+    if message.trim().is_empty() {
+        return Err(AppError::InvalidArgument("Commit message cannot be empty".to_string()));
+    }
+    let safe_path = repo_path.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
+    use base64::Engine;
+    let b64_msg = base64::prelude::BASE64_STANDARD.encode(message.as_bytes());
+
+    let do_stage = stage_all.unwrap_or(true);
+    let cmd = if do_stage {
+        format!(
+            "git -C \"{path}\" add -A && echo \"{b64}\" | base64 -d | git -C \"{path}\" commit -F - 2>&1",
+            path = safe_path,
+            b64 = b64_msg
+        )
+    } else {
+        format!(
+            "echo \"{b64}\" | base64 -d | git -C \"{path}\" commit -F - 2>&1",
+            path = safe_path,
+            b64 = b64_msg
+        )
+    };
+
+    let output = state
+        .connection
+        .exec_command_with_timeout(&server_id, &cmd, std::time::Duration::from_secs(15))
+        .await?;
+    Ok(output)
+}
+
+#[tauri::command]
+async fn git_push(
+    server_id: String,
+    repo_path: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<String> {
+    let safe_path = repo_path.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
+    let cmd = format!(
+        "git -C \"{path}\" push 2>&1 || git -C \"{path}\" push -u origin HEAD 2>&1",
+        path = safe_path
+    );
+    let output = state
+        .connection
+        .exec_command_with_timeout(&server_id, &cmd, std::time::Duration::from_secs(35))
+        .await?;
+    Ok(output)
+}
+
+#[tauri::command]
+async fn git_pull(
+    server_id: String,
+    repo_path: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<String> {
+    let safe_path = repo_path.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
+    let cmd = format!("git -C \"{}\" pull 2>&1", safe_path);
+    let output = state
+        .connection
+        .exec_command_with_timeout(&server_id, &cmd, std::time::Duration::from_secs(35))
+        .await?;
+    Ok(output)
+}
+
+#[tauri::command]
+async fn git_sync(
+    server_id: String,
+    repo_path: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<String> {
+    let safe_path = repo_path.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
+    let cmd = format!(
+        "git -C \"{path}\" pull 2>&1 && (git -C \"{path}\" push 2>&1 || git -C \"{path}\" push -u origin HEAD 2>&1)",
+        path = safe_path
+    );
+    let output = state
+        .connection
+        .exec_command_with_timeout(&server_id, &cmd, std::time::Duration::from_secs(45))
+        .await?;
+    Ok(output)
+}
+
+#[tauri::command]
+async fn git_get_summary_diff(
+    server_id: String,
+    repo_path: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<String> {
+    let safe_path = repo_path.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
+    let cmd = format!(
+        r#"echo "===STATUS==="; git -C "{path}" status --short 2>&1; echo "===DIFF==="; git -C "{path}" diff HEAD 2>&1 | head -c 4000 || git -C "{path}" diff 2>&1 | head -c 4000"#,
+        path = safe_path
+    );
+    let output = state
+        .connection
+        .exec_command_with_timeout(&server_id, &cmd, std::time::Duration::from_secs(10))
+        .await?;
     Ok(output)
 }
 
@@ -1274,9 +1490,50 @@ pub fn run() {
             git_get_status,
             git_checkout,
             git_get_diff,
+            git_commit,
+            git_push,
+            git_pull,
+            git_sync,
+            git_get_summary_diff,
+            gh_get_auth_status,
+            gh_switch_account,
             get_server_overview,
             search_in_files
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_gh_auth_status() {
+        let sample = r#"
+github.com
+  ✓ Logged in to github.com account 0xcube-666 (/root/.config/gh/hosts.yml)
+  - Active account: false
+  - Git operations protocol: https
+
+  ✓ Logged in to github.com account xzsean666 (/root/.config/gh/hosts.yml)
+  - Active account: true
+  - Git operations protocol: https
+"#;
+        let status = parse_gh_auth_status(sample);
+        assert!(status.is_installed);
+        assert_eq!(status.active_account.as_deref(), Some("xzsean666"));
+        assert_eq!(status.accounts, vec!["0xcube-666".to_string(), "xzsean666".to_string()]);
+        assert!(status.error.is_none());
+    }
+
+    #[test]
+    fn test_parse_gh_not_installed() {
+        let sample = "bash: line 1: gh: command not found";
+        let status = parse_gh_auth_status(sample);
+        assert!(!status.is_installed);
+        assert!(status.active_account.is_none());
+        assert!(status.accounts.is_empty());
+        assert!(status.error.is_some());
+    }
 }

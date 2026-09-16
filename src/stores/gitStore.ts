@@ -1,7 +1,23 @@
 import { create } from "zustand";
-import { safeInvoke, formatErrorMessage } from "../utils/tauriBridge";
+import {
+  safeInvoke,
+  formatErrorMessage,
+  GhAuthStatus,
+  getGhAuthStatus,
+  switchGhAccount as apiSwitchGhAccount,
+  gitCommit,
+  gitPush,
+  gitPull,
+  gitSync,
+  gitGetSummaryDiff,
+} from "../utils/tauriBridge";
 import { useFileTreeStore } from "./fileTreeStore";
 import { useConnectionStore } from "./connectionStore";
+import {
+  generateCommitMessage,
+  getSavedCommitLang,
+  saveCommitLang,
+} from "../services/aiCommitService";
 
 export interface GitFileChange {
   path: string;
@@ -19,6 +35,8 @@ export interface GitStatusResult {
   error?: string | null;
 }
 
+export type GitOperationType = "commit" | "push" | "pull" | "sync" | "ai" | null;
+
 interface GitState {
   isRepo: boolean;
   currentBranch: string | null;
@@ -31,11 +49,34 @@ interface GitState {
   diffContent: string | null;
   diffLoading: boolean;
 
+  // GitHub Auth status & accounts
+  ghAuth: GhAuthStatus | null;
+  ghLoading: boolean;
+
+  // Commit & AI generation
+  commitMessage: string;
+  commitLang: "en" | "zh";
+  isOperating: boolean;
+  operatingAction: GitOperationType;
+  aiGenerating: boolean;
+
+  setCommitMessage: (msg: string) => void;
+  setCommitLang: (lang: "en" | "zh") => void;
+
   fetchStatus: (serverId?: string, repoPath?: string) => Promise<void>;
+  fetchGhAuth: (serverId?: string) => Promise<void>;
+  switchGhAccount: (serverId: string, username: string) => Promise<void>;
   isPathIgnored: (filePath: string, rootPath?: string) => boolean;
   switchBranch: (serverId: string, repoPath: string, branch: string, createNew?: boolean) => Promise<void>;
   fetchDiff: (serverId: string, repoPath: string, filePath: string) => Promise<void>;
   clearDiff: () => void;
+
+  // Git operations
+  commitChanges: (serverId: string, repoPath: string, stageAll?: boolean) => Promise<void>;
+  pushChanges: (serverId: string, repoPath: string) => Promise<void>;
+  pullChanges: (serverId: string, repoPath: string) => Promise<void>;
+  syncChanges: (serverId: string, repoPath: string) => Promise<void>;
+  generateAiCommit: (serverId: string, repoPath: string) => Promise<void>;
 }
 
 export const useGitStore = create<GitState>((set, get) => ({
@@ -49,6 +90,22 @@ export const useGitStore = create<GitState>((set, get) => ({
   selectedDiffFile: null,
   diffContent: null,
   diffLoading: false,
+
+  ghAuth: null,
+  ghLoading: false,
+
+  commitMessage: "",
+  commitLang: getSavedCommitLang(),
+  isOperating: false,
+  operatingAction: null,
+  aiGenerating: false,
+
+  setCommitMessage: (msg: string) => set({ commitMessage: msg }),
+
+  setCommitLang: (lang: "en" | "zh") => {
+    saveCommitLang(lang);
+    set({ commitLang: lang });
+  },
 
   isPathIgnored: (filePath: string, rootPath?: string) => {
     const state = get();
@@ -95,6 +152,9 @@ export const useGitStore = create<GitState>((set, get) => ({
         error: res.error || null,
         loading: false,
       });
+
+      // Also trigger background fetch for gh auth status
+      get().fetchGhAuth(serverId);
     } catch (err: any) {
       set({
         isRepo: false,
@@ -102,6 +162,45 @@ export const useGitStore = create<GitState>((set, get) => ({
         error: formatErrorMessage(err),
         loading: false,
       });
+    }
+  },
+
+  fetchGhAuth: async (overrideServerId?: string) => {
+    const serverId =
+      overrideServerId ||
+      useConnectionStore.getState().activeServerId ||
+      useFileTreeStore.getState().currentServerId;
+
+    if (!serverId) return;
+
+    set({ ghLoading: true });
+    try {
+      const status = await getGhAuthStatus(serverId);
+      set({ ghAuth: status, ghLoading: false });
+    } catch (err: any) {
+      set({
+        ghAuth: {
+          is_installed: false,
+          active_account: null,
+          accounts: [],
+          error: formatErrorMessage(err),
+        },
+        ghLoading: false,
+      });
+    }
+  },
+
+  switchGhAccount: async (serverId: string, username: string) => {
+    set({ ghLoading: true, error: null });
+    try {
+      const status = await apiSwitchGhAccount(serverId, username);
+      set({ ghAuth: status, ghLoading: false });
+    } catch (err: any) {
+      set({
+        error: `切换 GitHub 账号失败: ${formatErrorMessage(err)}`,
+        ghLoading: false,
+      });
+      throw err;
     }
   },
 
@@ -114,7 +213,6 @@ export const useGitStore = create<GitState>((set, get) => ({
         branch,
         createNew,
       });
-      // Refresh status after branch switch
       await get().fetchStatus(serverId, repoPath);
     } catch (err: any) {
       set({
@@ -144,5 +242,92 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   clearDiff: () => {
     set({ selectedDiffFile: null, diffContent: null, diffLoading: false });
+  },
+
+  commitChanges: async (serverId: string, repoPath: string, stageAll: boolean = true) => {
+    const msg = get().commitMessage.trim();
+    if (!msg) {
+      set({ error: "请输入 Commit 提交描述信息" });
+      return;
+    }
+
+    set({ isOperating: true, operatingAction: "commit", error: null });
+    try {
+      await gitCommit(serverId, repoPath, msg, stageAll);
+      set({ commitMessage: "", isOperating: false, operatingAction: null });
+      await get().fetchStatus(serverId, repoPath);
+    } catch (err: any) {
+      set({
+        error: `Commit 提交失败: ${formatErrorMessage(err)}`,
+        isOperating: false,
+        operatingAction: null,
+      });
+      throw err;
+    }
+  },
+
+  pushChanges: async (serverId: string, repoPath: string) => {
+    set({ isOperating: true, operatingAction: "push", error: null });
+    try {
+      await gitPush(serverId, repoPath);
+      set({ isOperating: false, operatingAction: null });
+      await get().fetchStatus(serverId, repoPath);
+    } catch (err: any) {
+      set({
+        error: `Push 推送失败: ${formatErrorMessage(err)}`,
+        isOperating: false,
+        operatingAction: null,
+      });
+      throw err;
+    }
+  },
+
+  pullChanges: async (serverId: string, repoPath: string) => {
+    set({ isOperating: true, operatingAction: "pull", error: null });
+    try {
+      await gitPull(serverId, repoPath);
+      set({ isOperating: false, operatingAction: null });
+      await get().fetchStatus(serverId, repoPath);
+    } catch (err: any) {
+      set({
+        error: `Pull 拉取失败: ${formatErrorMessage(err)}`,
+        isOperating: false,
+        operatingAction: null,
+      });
+      throw err;
+    }
+  },
+
+  syncChanges: async (serverId: string, repoPath: string) => {
+    set({ isOperating: true, operatingAction: "sync", error: null });
+    try {
+      await gitSync(serverId, repoPath);
+      set({ isOperating: false, operatingAction: null });
+      await get().fetchStatus(serverId, repoPath);
+    } catch (err: any) {
+      set({
+        error: `Sync 同步失败: ${formatErrorMessage(err)}`,
+        isOperating: false,
+        operatingAction: null,
+      });
+      throw err;
+    }
+  },
+
+  generateAiCommit: async (serverId: string, repoPath: string) => {
+    const { commitLang } = get();
+    set({ aiGenerating: true, error: null });
+    try {
+      const summaryDiff = await gitGetSummaryDiff(serverId, repoPath);
+      const generated = await generateCommitMessage(summaryDiff, {
+        language: commitLang,
+      });
+      set({ commitMessage: generated, aiGenerating: false });
+    } catch (err: any) {
+      set({
+        error: `AI Commit 生成失败: ${formatErrorMessage(err)}`,
+        aiGenerating: false,
+      });
+    }
   },
 }));

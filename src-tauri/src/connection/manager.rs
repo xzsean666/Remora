@@ -449,6 +449,15 @@ impl ConnectionManager {
     }
 
     pub async fn exec_command(&self, server_id: &str, command: &str) -> Result<String> {
+        self.exec_command_with_timeout(server_id, command, Duration::from_secs(8)).await
+    }
+
+    pub async fn exec_command_with_timeout(
+        &self,
+        server_id: &str,
+        command: &str,
+        timeout_dur: Duration,
+    ) -> Result<String> {
         let channel = self.open_channel(server_id).await?;
         let mut channel = channel;
         channel
@@ -457,7 +466,6 @@ impl ConnectionManager {
             .map_err(|e| AppError::Internal(format!("Failed to exec command: {}", e)))?;
 
         let mut output = Vec::new();
-        let timeout_dur = Duration::from_secs(8);
 
         let read_result = tokio::time::timeout(timeout_dur, async {
             while let Some(msg) = channel.wait().await {
@@ -481,7 +489,10 @@ impl ConnectionManager {
 
         match read_result {
             Ok(_) => Ok(String::from_utf8_lossy(&output).to_string()),
-            Err(_) => Err(AppError::Internal("SSH command execution timed out after 8s".to_string())),
+            Err(_) => Err(AppError::Internal(format!(
+                "SSH command execution timed out after {}s",
+                timeout_dur.as_secs()
+            ))),
         }
     }
 }
