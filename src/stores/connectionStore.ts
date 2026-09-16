@@ -269,6 +269,27 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
           if (firstConnected) nextActive = firstConnected;
         }
 
+        // Bail out early if active server and all connection states are completely unchanged
+        let hasChanged = nextActive !== state.activeServerId;
+        if (!hasChanged) {
+          const oldKeys = Object.keys(state.serverStates);
+          const newKeys = Object.keys(updatedStates);
+          if (oldKeys.length !== newKeys.length) {
+            hasChanged = true;
+          } else {
+            for (const k of newKeys) {
+              if (state.serverStates[k] !== updatedStates[k]) {
+                hasChanged = true;
+                break;
+              }
+            }
+          }
+        }
+
+        if (!hasChanged) {
+          return state;
+        }
+
         const derived = deriveActiveFields(
           nextActive,
           updatedStates,

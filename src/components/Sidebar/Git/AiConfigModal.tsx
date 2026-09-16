@@ -48,9 +48,9 @@ export const AiConfigModal: React.FC<AiConfigModalProps> = ({
   const handleReset = () => {
     const defaultKey = (import.meta as any).env?.VITE_AI_API_KEY || "";
     const defaultBaseUrl =
-      (import.meta as any).env?.VITE_AI_BASE_URL || "https://openrouter.ai/api/v1";
+      (import.meta as any).env?.VITE_AI_BASE_URL || "http://127.0.0.1/v1";
     const defaultModel =
-      (import.meta as any).env?.VITE_AI_MODEL || "nvidia/nemotron-3.5-lightning:free";
+      (import.meta as any).env?.VITE_AI_MODEL || "qwen3.5:2b-optimized";
 
     setApiKey(defaultKey);
     setBaseUrl(defaultBaseUrl);
@@ -90,7 +90,7 @@ export const AiConfigModal: React.FC<AiConfigModalProps> = ({
             <div className="flex items-center justify-between">
               <label className="text-vscode-textBright font-medium flex items-center gap-1.5">
                 <Key className="w-3.5 h-3.5 text-amber-400" />
-                <span>API Key (OpenRouter / OpenAI)</span>
+                <span>API Key (自建服务 / OpenRouter / OpenAI)</span>
               </label>
               {hasEnvKey && (
                 <span className="text-[10px] text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800/60">
@@ -103,7 +103,7 @@ export const AiConfigModal: React.FC<AiConfigModalProps> = ({
                 type={showKey ? "text" : "password"}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-or-v1-..."
+                placeholder="sk-..."
                 className="w-full bg-[#141414] border border-vscode-border/80 focus:border-vscode-activityBarActive rounded px-2.5 py-1.5 pr-8 text-vscode-textBright font-mono text-xs outline-hidden"
               />
               <button
@@ -116,7 +116,7 @@ export const AiConfigModal: React.FC<AiConfigModalProps> = ({
               </button>
             </div>
             <p className="text-[11px] text-vscode-textMuted">
-              支持 OpenRouter 密钥或任何 OpenAI 兼容接口密钥。
+              支持自建模型密钥、OpenRouter 密钥或任何 OpenAI 兼容接口密钥。
             </p>
           </div>
 
@@ -130,7 +130,7 @@ export const AiConfigModal: React.FC<AiConfigModalProps> = ({
               type="text"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="https://openrouter.ai/api/v1"
+              placeholder="http://127.0.0.1/v1 或 https://openrouter.ai/api/v1"
               className="w-full bg-[#141414] border border-vscode-border/80 focus:border-vscode-activityBarActive rounded px-2.5 py-1.5 text-vscode-textBright font-mono text-xs outline-hidden"
             />
           </div>
@@ -139,30 +139,55 @@ export const AiConfigModal: React.FC<AiConfigModalProps> = ({
           <div className="space-y-1.5">
             <label className="text-vscode-textBright font-medium flex items-center gap-1.5">
               <Cpu className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Model Name (默认快速免费模型)</span>
+              <span>Model Name</span>
             </label>
             <input
               type="text"
               value={model}
               onChange={(e) => setModel(e.target.value)}
-              placeholder="nvidia/nemotron-3.5-lightning:free"
+              placeholder="qwen3.5:2b-optimized"
               className="w-full bg-[#141414] border border-vscode-border/80 focus:border-vscode-activityBarActive rounded px-2.5 py-1.5 text-vscode-textBright font-mono text-xs outline-hidden"
             />
             <div className="flex flex-wrap gap-1 pt-1">
-              <span className="text-[10px] text-vscode-textMuted self-center">推荐免费模型:</span>
+              <span className="text-[10px] text-vscode-textMuted self-center">快捷预设:</span>
               <button
                 type="button"
-                onClick={() => setModel("nvidia/nemotron-3.5-lightning:free")}
-                className="text-[10px] px-1.5 py-0.5 rounded bg-[#2a2a2a] hover:bg-[#383838] text-gray-300 transition-colors"
+                onClick={() => {
+                  setModel("qwen3.5:2b-optimized");
+                  if (!baseUrl || baseUrl.includes("openrouter.ai")) {
+                    setBaseUrl("http://127.0.0.1/v1");
+                  }
+                }}
+                className="text-[10px] px-1.5 py-0.5 rounded bg-[#2a2a2a] hover:bg-[#383838] text-purple-300 border border-purple-900/40 transition-colors"
+                title="自建本地/私有部署模型"
               >
-                nemotron-3.5 (推荐)
+                qwen3.5:2b (自建)
               </button>
               <button
                 type="button"
-                onClick={() => setModel("google/gemma-4-31b-it:free")}
+                onClick={() => {
+                  setModel("nvidia/nemotron-3.5-lightning:free");
+                  if (!baseUrl || baseUrl.includes("127.0.0.1")) {
+                    setBaseUrl("https://openrouter.ai/api/v1");
+                  }
+                }}
                 className="text-[10px] px-1.5 py-0.5 rounded bg-[#2a2a2a] hover:bg-[#383838] text-gray-300 transition-colors"
+                title="OpenRouter 免费极速模型"
               >
-                gemma-4-31b
+                nemotron-3.5 (OpenRouter)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setModel("google/gemma-4-31b-it:free");
+                  if (!baseUrl || baseUrl.includes("127.0.0.1")) {
+                    setBaseUrl("https://openrouter.ai/api/v1");
+                  }
+                }}
+                className="text-[10px] px-1.5 py-0.5 rounded bg-[#2a2a2a] hover:bg-[#383838] text-gray-300 transition-colors"
+                title="OpenRouter 免费模型"
+              >
+                gemma-4-31b (OpenRouter)
               </button>
             </div>
           </div>

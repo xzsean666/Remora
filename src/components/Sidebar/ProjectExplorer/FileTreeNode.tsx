@@ -31,31 +31,33 @@ function hasMatchingChild(
   return false;
 }
 
-export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
+const EMPTY_CHILDREN: FileEntry[] = [];
+
+export const FileTreeNode: React.FC<FileTreeNodeProps> = React.memo(({
   entry,
   level = 0,
   onOpenFile,
   onInternalDrop,
   filterQuery = "",
 }) => {
-  const {
-    tree,
-    rootPath,
-    expandedPaths,
-    selectedPath,
-    loadingPaths,
-    dirErrors,
-    dragOverPath,
-    setDragOverPath,
-    toggleExpand,
-    setSelectedPath,
-    createFile,
-    createDir,
-    renameItem,
-    requestDelete,
-    refreshPath,
-    currentServerId,
-  } = useFileTreeStore();
+  const rootPath = useFileTreeStore((s) => s.rootPath);
+  const isExpandedInStore = useFileTreeStore((s) => s.expandedPaths.includes(entry.path));
+  const isSelected = useFileTreeStore((s) => s.selectedPath === entry.path);
+  const isLoading = useFileTreeStore((s) => entry.is_dir && s.loadingPaths.includes(entry.path));
+  const isDragOver = useFileTreeStore((s) => entry.is_dir && s.dragOverPath === entry.path);
+  const children = useFileTreeStore((s) => entry.is_dir ? s.tree[entry.path] || EMPTY_CHILDREN : EMPTY_CHILDREN);
+  const hasChildrenLoaded = useFileTreeStore((s) => entry.is_dir && Boolean(s.tree[entry.path]));
+  const nodeError = useFileTreeStore((s) => entry.is_dir ? s.dirErrors[entry.path] || null : null);
+  const currentServerId = useFileTreeStore((s) => s.currentServerId);
+
+  const toggleExpand = useFileTreeStore((s) => s.toggleExpand);
+  const setSelectedPath = useFileTreeStore((s) => s.setSelectedPath);
+  const setDragOverPath = useFileTreeStore((s) => s.setDragOverPath);
+  const createFile = useFileTreeStore((s) => s.createFile);
+  const createDir = useFileTreeStore((s) => s.createDir);
+  const renameItem = useFileTreeStore((s) => s.renameItem);
+  const requestDelete = useFileTreeStore((s) => s.requestDelete);
+  const refreshPath = useFileTreeStore((s) => s.refreshPath);
   const { downloadFile } = useTransferStore();
 
   const changes = useGitStore((s) => s.changes);
@@ -64,21 +66,17 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
 
   const cleanQuery = (filterQuery || "").trim().toLowerCase();
   const nameMatches = !cleanQuery || entry.name.toLowerCase().includes(cleanQuery);
-  const childMatches = entry.is_dir && cleanQuery ? hasMatchingChild(entry.path, cleanQuery, tree) : false;
+  const childMatches = entry.is_dir && cleanQuery
+    ? hasMatchingChild(entry.path, cleanQuery, useFileTreeStore.getState().tree)
+    : false;
 
   if (cleanQuery && !nameMatches && !childMatches) {
     return null;
   }
 
   const isExpanded = cleanQuery
-    ? (childMatches || expandedPaths.includes(entry.path))
-    : expandedPaths.includes(entry.path);
-
-  const isSelected = selectedPath === entry.path;
-  const isLoading = loadingPaths.includes(entry.path);
-  const isDragOver = entry.is_dir && dragOverPath === entry.path;
-  const children = tree[entry.path] || [];
-  const nodeError = entry.is_dir ? dirErrors[entry.path] : null;
+    ? (childMatches || isExpandedInStore)
+    : isExpandedInStore;
 
   const parentPath = entry.path.substring(0, entry.path.lastIndexOf("/")) || "/";
 
@@ -179,12 +177,13 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
+    const currentDrag = useFileTreeStore.getState().dragOverPath;
     if (entry.is_dir) {
-      if (dragOverPath !== entry.path) {
+      if (currentDrag !== entry.path) {
         setDragOverPath(entry.path);
       }
     } else {
-      if (dragOverPath !== parentPath) {
+      if (currentDrag !== parentPath) {
         setDragOverPath(parentPath);
       }
     }
@@ -193,7 +192,8 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (entry.is_dir && dragOverPath === entry.path) {
+    const currentDrag = useFileTreeStore.getState().dragOverPath;
+    if (entry.is_dir && currentDrag === entry.path) {
       setDragOverPath(null);
     }
   };
@@ -244,7 +244,7 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
             }}
             className="w-4 h-4 flex items-center justify-center mr-0.5 text-vscode-textMuted hover:text-vscode-textBright flex-shrink-0"
           >
-            {isLoading ? (
+            {isLoading && !hasChildrenLoaded ? (
               <Loader2 className="w-3 h-3 animate-spin text-vscode-activityBarActive" />
             ) : isExpanded ? (
               <ChevronDown className="w-3.5 h-3.5" />
@@ -425,4 +425,6 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
       )}
     </div>
   );
-};
+});
+
+FileTreeNode.displayName = "FileTreeNode";

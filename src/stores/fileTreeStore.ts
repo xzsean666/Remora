@@ -56,6 +56,27 @@ interface FileTreeState {
   restoreLastWorkspace: () => Promise<void>;
 }
 
+function areEntriesEqual(prev: FileEntry[] | undefined, next: FileEntry[]): boolean {
+  if (!prev) return false;
+  if (prev === next) return true;
+  if (prev.length !== next.length) return false;
+  for (let i = 0; i < prev.length; i++) {
+    const a = prev[i];
+    const b = next[i];
+    if (
+      a.name !== b.name ||
+      a.path !== b.path ||
+      a.is_dir !== b.is_dir ||
+      a.is_symlink !== b.is_symlink ||
+      a.size !== b.size ||
+      a.mtime !== b.mtime
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export const useFileTreeStore = create<FileTreeState>((set, get) => ({
   currentServerId: null,
   rootPath: null,
@@ -247,9 +268,22 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       set((state) => {
         const nextErrors = { ...state.dirErrors };
         delete nextErrors[dirPath];
+
+        const prevEntries = state.tree[dirPath];
+        const isUnchanged = areEntriesEqual(prevEntries, entries);
+        const wasInLoading = state.loadingPaths.includes(dirPath);
+        const nextLoading = wasInLoading
+          ? state.loadingPaths.filter((p) => p !== dirPath)
+          : state.loadingPaths;
+
+        // If data is identical and loading / error state didn't change, avoid creating new object references
+        if (isUnchanged && !wasInLoading && !state.dirErrors[dirPath]) {
+          return state;
+        }
+
         return {
-          tree: { ...state.tree, [dirPath]: entries },
-          loadingPaths: state.loadingPaths.filter((p) => p !== dirPath),
+          tree: isUnchanged ? state.tree : { ...state.tree, [dirPath]: entries },
+          loadingPaths: nextLoading,
           dirErrors: nextErrors,
         };
       });

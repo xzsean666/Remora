@@ -136,6 +136,7 @@ export default function App() {
 
     // Auto-sync connection and auto-heal disconnected active terminal and workspace upon app focus / foreground resume
     let lastResumeTime = 0;
+    let lastFileTreeResumeTime = 0;
     const handleResume = async () => {
       const now = Date.now();
       if (now - lastResumeTime < 1500) return;
@@ -155,7 +156,8 @@ export default function App() {
       const { currentServerId, rootPath, refreshPath } = useFileTreeStore.getState();
       const { isServerConnected, reconnect } = useConnectionStore.getState();
       if (currentServerId && rootPath) {
-        if (!isServerConnected(currentServerId)) {
+        const wasDisconnected = !isServerConnected(currentServerId);
+        if (wasDisconnected) {
           console.info("[Remora] Foreground resume: auto-recovering workspace server", currentServerId);
           try {
             await reconnect(currentServerId);
@@ -163,8 +165,12 @@ export default function App() {
             console.warn("[Remora] Failed to reconnect workspace server on resume:", e);
           }
         }
-        // Refresh directory tree to reflect remote state and recover any broken folder views
-        refreshPath(rootPath).catch(() => {});
+        // Only refresh directory tree if the connection was broken/recovered, or at least 30s has passed.
+        // Always pass silent: true to prevent UI Loader2 flickering when switching windows to copy/paste!
+        if (wasDisconnected || now - lastFileTreeResumeTime > 30000) {
+          lastFileTreeResumeTime = now;
+          refreshPath(rootPath, true).catch(() => {});
+        }
       }
 
       // 3. Refresh server overview if connected

@@ -25,9 +25,9 @@ export function getAiConfig(): AiConfig {
 
   const defaultKey = (import.meta as any).env?.VITE_AI_API_KEY || "";
   const defaultBaseUrl =
-    (import.meta as any).env?.VITE_AI_BASE_URL || "https://openrouter.ai/api/v1";
+    (import.meta as any).env?.VITE_AI_BASE_URL || "http://127.0.0.1/v1";
   const defaultModel =
-    (import.meta as any).env?.VITE_AI_MODEL || "nvidia/nemotron-3.5-lightning:free";
+    (import.meta as any).env?.VITE_AI_MODEL || "qwen3.5:2b-optimized";
 
   return {
     apiKey: (saved.apiKey !== undefined && saved.apiKey !== "") ? saved.apiKey : defaultKey,
@@ -72,7 +72,7 @@ export interface GenerateCommitOptions {
 }
 
 /**
- * Generates a clean Conventional Commit message via OpenRouter / OpenAI API.
+ * Generates a clean Conventional Commit message via self-hosted model or OpenRouter / OpenAI API.
  */
 export async function generateCommitMessage(
   summaryDiff: string,
@@ -80,13 +80,14 @@ export async function generateCommitMessage(
 ): Promise<string> {
   const config = getAiConfig();
   const apiKey = options.apiKey || config.apiKey;
-  let baseUrl = (options.baseUrl || config.baseUrl || "https://openrouter.ai/api/v1").replace(/\/+$/, "");
-  const model = options.model || config.model || "nvidia/nemotron-3.5-lightning:free";
+  const rawBaseUrl = options.baseUrl || config.baseUrl || "http://127.0.0.1/v1";
+  const baseUrl = rawBaseUrl.replace(/\/+$/, "");
+  const model = options.model || config.model || "qwen3.5:2b-optimized";
   const language = options.language || getSavedCommitLang();
 
   if (!apiKey || apiKey.trim() === "") {
     throw new Error(
-      "未检测到 AI API Key。请在设置中输入或在构建环境 / .env 中提供 OPEN_ROUTER_API_KEY"
+      "未检测到 AI API Key。请在设置中输入或在构建环境 / .env 中提供 AI_API_KEY / OPEN_ROUTER_API_KEY"
     );
   }
 
@@ -113,25 +114,41 @@ Rules:
   const userPrompt = `Here is the current git status and diff:\n\n${summaryDiff.slice(0, 4000)}\n\nPlease generate the commit message now:`;
 
   const endpoint = `${baseUrl}/chat/completions`;
+  const isOpenRouter = baseUrl.toLowerCase().includes("openrouter.ai");
+
+  const headers: Record<string, string> = {
+    "Authorization": `Bearer ${apiKey.trim()}`,
+    "Content-Type": "application/json",
+  };
+
+  // OpenRouter requires specific metadata headers
+  if (isOpenRouter) {
+    headers["HTTP-Referer"] = "https://github.com/xzsean666/Remora";
+    headers["X-Title"] = "Remora Git Assistant";
+  }
+
+  const requestBody: Record<string, any> = {
+    model: model.trim(),
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    temperature: 0.2,
+    max_tokens: 300,
+  };
+
+  if (isOpenRouter) {
+    // OpenRouter reasoning token suppression
+    requestBody.reasoning = { max_tokens: 0 };
+  } else {
+    // Ollama / Qwen / standard OpenAI reasoning suppression
+    requestBody.reasoning_effort = "none";
+  }
 
   const resp = await fetch(endpoint, {
     method: "POST",
-    headers: {
-      "Authorization": `Bearer ${apiKey.trim()}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://github.com/xzsean666/Remora",
-      "X-Title": "Remora Git Assistant",
-    },
-    body: JSON.stringify({
-      model: model.trim(),
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      temperature: 0.2,
-      max_tokens: 150,
-      reasoning: { max_tokens: 0 },
-    }),
+    headers,
+    body: JSON.stringify(requestBody),
   });
 
   if (!resp.ok) {
@@ -145,8 +162,46 @@ Rules:
     throw new Error(`AI 请求失败 (${resp.status}): ${errorText || resp.statusText}`);
   }
 
-  const data = await resp.json();
-  let rawContent: string = data?.choices?.[0]?.message?.content || "";
+  let rawContent = "";
+  const contentType = resp.headers.get("content-type") || "";
+
+  if (contentType.includes("text/event-stream") && resp.body) {
+    // Parse SSE streaming response if returned
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let streamBuffer = "";
+    let done = false;
+    while (!done) {
+      const { value, done: isDone } = await reader.read();
+      done = isDone;
+      if (value) {
+        streamBuffer += decoder.decode(value, { stream: !done });
+      }
+    }
+
+    const lines = streamBuffer.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith("data:")) continue;
+      const jsonStr = trimmed.slice(5).trim();
+      if (jsonStr === "[DONE]") continue;
+      try {
+        const chunk = JSON.parse(jsonStr);
+        const deltaContent = chunk?.choices?.[0]?.delta?.content;
+        if (deltaContent) {
+          rawContent += deltaContent;
+        }
+      } catch {}
+    }
+  } else {
+    const data = await resp.json();
+    rawContent = data?.choices?.[0]?.message?.content || "";
+
+    // Fallback: If content is empty but model emitted reasoning, extract from reasoning
+    if (!rawContent.trim() && data?.choices?.[0]?.message?.reasoning) {
+      rawContent = data.choices[0].message.reasoning;
+    }
+  }
 
   if (!rawContent) {
     throw new Error("AI 未返回有效的 Commit 描述信息");
@@ -155,7 +210,7 @@ Rules:
   // Strip reasoning blocks if model outputs <think>...</think>
   rawContent = rawContent.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 
-  // Strip markdown code fences
+  // Strip markdown code fences (e.g. ```text or ```)
   rawContent = rawContent.replace(/^```[a-z0-9_-]*\s*/i, "").replace(/\s*```$/i, "").trim();
 
   // Strip surrounding quotes

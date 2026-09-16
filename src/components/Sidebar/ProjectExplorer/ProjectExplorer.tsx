@@ -119,7 +119,7 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
     if (isRefreshing || !rootPath) return;
     setIsRefreshing(true);
     try {
-      await refreshPath(rootPath);
+      await refreshPath(rootPath, true);
       const targetServer = currentServerId || activeServerId;
       if (targetServer) {
         await useGitStore.getState().fetchStatus(targetServer, rootPath);
@@ -1073,16 +1073,16 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
           </div>
         )}
 
-        {/* Loading Spinner */}
-        {loadingPaths.includes(rootPath) && (
+        {/* Loading Spinner only on initial load when directory entries are not yet in memory */}
+        {!tree[rootPath] && loadingPaths.includes(rootPath) && (
           <div className="flex flex-col items-center justify-center p-8 text-vscode-textMuted gap-2.5">
             <Loader2 className="w-5 h-5 animate-spin text-vscode-activityBarActive" />
             <span className="text-xs">Loading {rootPath}...</span>
           </div>
         )}
 
-        {/* Directory Load Error Card */}
-        {dirErrors[rootPath] && !loadingPaths.includes(rootPath) && (
+        {/* Directory Load Error Card (only when initial load failed and no cached entries exist) */}
+        {dirErrors[rootPath] && !tree[rootPath] && !loadingPaths.includes(rootPath) && (
           <div className="m-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 flex flex-col gap-2">
             <div className="flex items-center gap-1.5 font-semibold text-xs text-rose-200">
               <AlertCircle className="w-4 h-4 text-rose-400 flex-shrink-0" />
@@ -1119,9 +1119,20 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
           </div>
         )}
 
-        {/* Tree Entries */}
-        {!loadingPaths.includes(rootPath) && !dirErrors[rootPath] && (
+        {/* Tree Entries: Stay smoothly mounted whenever tree[rootPath] exists, preventing jarring flashes during refreshes */}
+        {Boolean(tree[rootPath]) && (
           <>
+            {dirErrors[rootPath] && (
+              <div className="mx-2 my-1 px-2 py-1 rounded bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[11px] flex items-center justify-between gap-1">
+                <span className="truncate">Refresh failed: {dirErrors[rootPath]}</span>
+                <button
+                  onClick={() => refreshPath(rootPath, true)}
+                  className="px-1.5 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/40 text-white text-[10px] cursor-pointer"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
             {rootEntries.map((entry) => (
               <FileTreeNode
                 key={entry.path}

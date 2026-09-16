@@ -70,21 +70,25 @@
 | **TASK-059** | VS Code 风格全局跨文件搜索系统 (VS Code Style Remote Global Search via SSH Exec) | TASK-003, TASK-004, TASK-006, TASK-008, TASK-019 | **DONE** | `docs/AI/tasks/TASK-059.md` |
 | **TASK-060** | Source Control 进阶升级（GitHub CLI 账号切换 + Commit/Push/Pull/Sync + OpenRouter AI 智能 Commit 生成） | TASK-003, TASK-045, TASK-059 | **DONE** | `docs/AI/tasks/TASK-060.md` |
 | **TASK-061** | 修复文件树路径复制失效保留旧内容与终端联动高频重绘闪烁缺陷 (Fix File Explorer Path Copy Failure & Terminal Title Auto-Refresh Flicker) | TASK-046, TASK-055 | **DONE** | `docs/AI/tasks/TASK-061.md` |
+| **TASK-062** | 彻底根除文件浏览侧边栏在粘贴命令行与窗口聚焦等场景下的频闪与整树重绘缺陷 (Completely Eliminate File Explorer Flickering on Terminal Paste & Window Focus) | TASK-046, TASK-061 | **DONE** | `docs/AI/tasks/TASK-062.md` |
+| **TASK-063** | 适配私有部署模型生成 Commit Message 并保留 OpenRouter 兼容支持 (Adapt Self-Hosted Model for AI Commit Generation while Preserving OpenRouter Compatibility) | TASK-060 | **DONE** | `docs/AI/tasks/TASK-063.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 62
+- **已完成 (DONE)**: 64
 - **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 62
+- **总任务数**: 64
 
 ---
 
 ## 3. 项目执行总结
 
+- **TASK-063** 圆满完成：适配私有部署模型生成 Commit Message 并保留 OpenRouter 兼容支持 (Adapt Self-Hosted Model for AI Commit Generation while Preserving OpenRouter Compatibility)。核心落地四项能力：1) **双轨模型分流与智能适配引擎**：在 `aiCommitService.ts` 中根据 Base URL 自动识别 OpenRouter 与私有部署模型，OpenRouter 保持原请求头与 `reasoning: { max_tokens: 0 }` 压制；私有模型（如 `qwen3.5:2b-optimized`）采用通用 OpenAI 标准请求头与 `reasoning_effort: "none"`，彻底杜绝思考过程消耗 token 导致的空白输出问题；2) **双向流式与非流式兼容解析**：支持 `text/event-stream` SSE 流与标准 JSON 解析，具备自动回退解析 `reasoning` 与正则清洗（剥除 `<think>` 标签、Markdown 代码块、引号与 `git commit -m` 前缀）；3) **环境配置与构建注入**：在 `.env` 中默认配置自建模型并完整保留 `OPEN_ROUTER_API_KEY`，在 `vite.config.ts` 中优化环境变量级联优先级与智能回退；4) **可视化设置弹窗升级**：在 `AiConfigModal.tsx` 中增加自建模型快捷预设与一键切换，TypeScript 0 报错，生产打包与 34 个 Rust 测试全量通过。
+- **TASK-062** 圆满完成：彻底根除文件浏览侧边栏在粘贴命令行与窗口聚焦等场景下的频闪与整树重绘缺陷 (Completely Eliminate File Explorer Flickering on Terminal Paste & Window Focus)。深度剖析并根治四大诱发原因：1) **文件树持久挂载与非破坏性原地更新**：在 `ProjectExplorer.tsx` 中将中央全屏旋转 Spinner 的展现条件严格限制为 `!tree[rootPath] && loadingPaths.includes(rootPath)`（仅在首次冷启动内存无数据时展示），只要 `tree[rootPath]` 已经加载，后续刷新绝对不卸载树节点，彻底根除切回窗口时整棵树突然消失并替换为加载大白块的剧烈白闪与跳动；2) **窗口切回聚焦节流与静默同步**：在 `App.tsx` 的 `handleResume` 中，为文件树远端同步添加 30 秒节流时间戳保护并透传 `silent: true`，彻底消除用户从外部复制并在几秒内切回终端粘贴时频繁触发的全树 SFTP 遍历；3) **Zustand 状态深度比对与零重绘拦截**：在 `fileTreeStore.ts` 引入高性能 `areEntriesEqual` 比对算法，当目录获取条目与内存数据完全一致时保留原引用并直接 `return state`，阻断事件分发，实现 0 组件重绘与 0 次 DOM 抖动；4) **节点组件精细化订阅与展开防晃**：在 `FileTreeNode.tsx` 改用精细化 Selector 并包裹 `React.memo`，仅在 `isLoading && !hasChildrenLoaded` 时显示 Loader2，已有缓存的展开目录在后台同步期间稳定保持 `<ChevronDown>`，彻底根除箭头跳跃；并在 `connectionStore.ts` 引入状态浅比对避免重复渲染。
 - **TASK-061** 圆满完成：修复文件树路径复制失效保留旧内容与终端联动高频重绘闪烁缺陷 (Fix File Explorer Path Copy Failure & Terminal Title Auto-Refresh Flicker)。深度剖析并根治两大核心痛点：1) **文件树路径复制失效与保留旧内容根治**：封装高可靠跨平台剪贴板工具库 `src/utils/clipboard.ts`，自动确立窗口焦点，采用现代异步 `navigator.clipboard.writeText` 结合经典同步 `document.execCommand('copy')`（创建只读隐藏 textarea）双轨容灾降级机制，彻底消除 Linux WebKitGTK 环境下因 DOM 卸载与焦点缺失抛出的 `NotAllowedError`；在 ContextMenu 中使用 `await onCopyPath()` 确保写入完成后再销毁菜单；挂载全局轻量毛玻璃 Toast 浮层，复制成功实时反馈路径；2) **终端联动高频重绘与文件树闪烁彻底治理**：在 `XtermView.tsx` 的 `term.onTitleChange` 中引入 `lastTitle` 缓存去重与有效 prompt 路径解析，彻底过滤 TMUX 状态栏秒针、日志输出与交互式 CLI 带来的无效刷新；在 `fileTreeStore.ts` 为 `loadDirectory` 与 `refreshPath` 引入 `silent` 静默模式，终端感知刷新时不变更 `loadingPaths`，彻底根除文件树展开箭头在折叠图标与 `Loader2` 旋转动画之间高频跳动闪烁，实现 0 频闪后台无感平滑同步。
 - **TASK-060** 圆满完成：Source Control 进阶升级（GitHub CLI 账号切换 + Commit/Push/Pull/Sync + OpenRouter AI 智能 Commit 生成）。精准落地四项核心诉求：1) **GitHub CLI (`gh`) 活跃账号感知与平滑切换**：在 Rust 后端实现 `gh_get_auth_status` 与 `gh_switch_account`，智能解析已登录多账号列表与 `Active account: true`，在界面提供 GitHub 账号徽标与下拉快速切换弹窗；2) **全套核心 Git 动作**：提供 Commit（支持一键 Stage All，通过 Base64 编码由 stdin 管道安全传入提交信息，彻底杜绝特殊字符注入）、Push（支持自动设置 upstream）、Pull（拉取合并）与 Sync（一键 Pull + Push），并在连接管理器中引入 `exec_command_with_timeout` 动态放宽网络超时保护至 35~45 秒；3) **OpenRouter AI 智能 Commit Message 引擎**：精选速度极快且完全免费的大上下文模型 `nvidia/nemotron-3.5-lightning:free`，并通过 `"reasoning": { "max_tokens": 0 }` 压制冗余思考输出，1.5 秒内极速生成规范的 Conventional Commit 消息；支持一键切换英文/中文（默认英文）；4) **双层凭据配置与 CI 注入**：`vite.config.ts` 自动读取 `.env` 中的 `OPEN_ROUTER_API_KEY`，`.github/workflows/release.yml` 在云端打包流水线中注入凭证，且前端配备独立设置弹窗支持随时自定义 API Key、Base URL 与 Model。
 - **TASK-059** 圆满完成：VS Code 风格全局跨文件搜索系统（远端自适应智能级联加速引擎 `ripgrep` -> `git grep` -> `grep` + Base64 零注入安全执行 + 大结果防爆流截断 + VS Code 经典三联开关 `Aa`、`\b`、`.*` 与高级路径包含/排除过滤 + 搜索结果树状折叠/展开 + 关键词高亮分段渲染 + 点击直达编辑器对应行与光标定位）。针对远程 SSH 无法走本地 SFTP 遍历读文件的性能瓶颈，创新性落地远程 Shell 管道流自适应执行架构：1) 在 Rust 后端实现 `SearchService` 与 `search_in_files` Tauri 命令，优先调用远端多线程 `ripgrep`，自动遵循 `.gitignore` 并跳过二进制与 `node_modules`；自动级联探测 `git grep` 与通用 `grep -rnI` 作为兜底，保证在任何远程 Linux/Mac/容器上 100% 毫秒级可用；2) 参数与正则检索词全程 Base64 编码注入远端 Shell，彻底杜绝 Shell 命令注入风险；3) 前端开发完整的 `SearchPanel.tsx`，与 ActivityBar 搜索图标 (`Ctrl+Shift+F`) 无缝集成；4) 扩展 `editorStore` 与 `CodeEditor.tsx`，点击检索项直接打开文件并精确定位与平滑滚屏至对应行和列。
