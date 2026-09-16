@@ -29,6 +29,7 @@ import { parseSshCommand } from "../../../utils/sshParser";
 import { OpenFolderModal } from "../ProjectExplorer/OpenFolderModal";
 import { KeyManagerModal } from "./KeyManagerModal";
 import { useSshKeyStore } from "../../../stores/sshKeyStore";
+import { copyTextToClipboard } from "../../../utils/clipboard";
 
 export const DEFAULT_NO_PROXY =
   "localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,172.17.0.0/16,172.18.0.0/16,172.19.0.0/16,172.20.0.0/16,192.168.0.0/16,*.local,.internal,host.docker.internal";
@@ -875,12 +876,10 @@ export const ServerManager: React.FC = () => {
                           <button
                             type="button"
                             onClick={async () => {
-                              try {
-                                await navigator.clipboard.writeText(ex);
+                              const ok = await copyTextToClipboard(ex, { toastLabel: `已复制代理地址: ${ex}` });
+                              if (ok) {
                                 setCopiedProxy(ex);
                                 setTimeout(() => setCopiedProxy(null), 2000);
-                              } catch (e) {
-                                console.error("Clipboard error:", e);
                               }
                             }}
                             title={`Copy ${ex} to clipboard`}

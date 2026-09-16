@@ -17,8 +17,8 @@ interface ContextMenuProps {
   onRename?: () => void;
   onDelete?: () => void;
   onRefresh?: () => void;
-  onCopyPath?: () => void;
-  onCopyRelativePath?: () => void;
+  onCopyPath?: () => void | Promise<any>;
+  onCopyRelativePath?: () => void | Promise<any>;
   onOpenInTerminal?: () => void;
   onDownload?: () => void;
   isDir: boolean;
@@ -118,9 +118,12 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
 
       {onCopyPath && (
         <button
-          onClick={() => {
-            onCopyPath();
-            onClose();
+          onClick={async () => {
+            try {
+              await onCopyPath();
+            } finally {
+              onClose();
+            }
           }}
           className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-vscode-selected hover:text-white transition-colors text-left"
         >
@@ -131,9 +134,12 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
 
       {onCopyRelativePath && (
         <button
-          onClick={() => {
-            onCopyRelativePath();
-            onClose();
+          onClick={async () => {
+            try {
+              await onCopyRelativePath();
+            } finally {
+              onClose();
+            }
           }}
           className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-vscode-selected hover:text-white transition-colors text-left"
         >

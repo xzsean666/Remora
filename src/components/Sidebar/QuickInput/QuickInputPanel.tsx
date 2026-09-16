@@ -23,6 +23,7 @@ import { useQuickSnippetStore } from "../../../stores/quickSnippetStore";
 import { QuickSnippet } from "../../../utils/tauriBridge";
 import { SnippetEditModal } from "./SnippetEditModal";
 import { GroupModal } from "./GroupModal";
+import { copyTextToClipboard } from "../../../utils/clipboard";
 import { ImportSnippetModal } from "./ImportSnippetModal";
 
 export const QuickInputPanel: React.FC = () => {
@@ -106,7 +107,7 @@ export const QuickInputPanel: React.FC = () => {
 
   const handleCopy = (snippet: QuickSnippet, e: React.MouseEvent) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(snippet.command);
+    copyTextToClipboard(snippet.command, { toastLabel: `已复制指令: ${snippet.title}` });
     setCopiedId(snippet.id);
     setTimeout(() => {
       setCopiedId((curr) => (curr === snippet.id ? null : curr));

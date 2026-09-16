@@ -8,6 +8,7 @@ import { useLayoutStore } from "../../../stores/layoutStore";
 import { getFileIcon } from "../../../utils/fileIcons";
 import { NewItemInput } from "./NewItemInput";
 import { ContextMenu } from "../ContextMenu";
+import { copyTextToClipboard } from "../../../utils/clipboard";
 
 interface FileTreeNodeProps {
   entry: FileEntry;
@@ -389,8 +390,8 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = ({
           onRename={() => setIsRenaming(true)}
           onDelete={() => requestDelete(entry.path, entry.name, entry.is_dir)}
           onRefresh={entry.is_dir ? () => refreshPath(entry.path) : undefined}
-          onCopyPath={() => navigator.clipboard.writeText(entry.path)}
-          onCopyRelativePath={() => navigator.clipboard.writeText(relPath)}
+          onCopyPath={() => copyTextToClipboard(entry.path, { toastLabel: `已复制路径: ${entry.name}` })}
+          onCopyRelativePath={() => copyTextToClipboard(relPath, { toastLabel: `已复制相对路径: ${relPath}` })}
           onOpenInTerminal={() => {
             const targetDir = entry.is_dir ? entry.path : parentPath;
             const { activeSessionId, sendDataToActiveTerminal, addSession, sessions } = useTerminalStore.getState();

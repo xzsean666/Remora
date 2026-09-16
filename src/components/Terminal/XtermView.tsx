@@ -9,6 +9,7 @@ import { TerminalSession, useTerminalStore, TMUX_SETUP_AND_ATTACH } from "../../
 import { useConnectionStore } from "../../stores/connectionStore";
 import { useLayoutStore } from "../../stores/layoutStore";
 import { useFileTreeStore } from "../../stores/fileTreeStore";
+import { copyTextToClipboard } from "../../utils/clipboard";
 
 /**
  * Searches for standard tmux startup / alternate screen sequences:
@@ -171,8 +172,8 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
         }
         const decodedText = new TextDecoder().decode(bytes);
         if (decodedText) {
-          navigator.clipboard.writeText(decodedText).then(() => {
-            triggerCopyFeedback();
+          copyTextToClipboard(decodedText, { showToast: false }).then((ok) => {
+            if (ok) triggerCopyFeedback();
           }).catch((err) => {
             console.warn("Failed to write OSC 52 text to clipboard:", err);
           });
@@ -194,21 +195,37 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
     });
 
     // Listen to shell prompt OSC title changes to track remote working directory in real-time
-    // and automatically refresh workspace file tree when command finishes and returns to prompt
+    // and automatically refresh workspace file tree when command finishes and returns to prompt.
+    // Enhanced anti-flicker:
+    // 1. Deduplicate consecutive identical titles (lastTitle);
+    // 2. Only trigger refresh if title explicitly contains a valid prompt working directory path;
+    // 3. Perform silent background refresh (silent: true) with a stable 1200ms debounce,
+    //    completely eliminating UI Loader2 flickering and unnecessary SFTP floods.
+    let lastTitle = "";
+    let lastExtractedDir = "";
     let refreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
     term.onTitleChange((title) => {
-      if (title) {
-        const match = title.match(/:\s*(~?\/[^\x07\x1b\r\n]*)/);
-        if (match && match[1]) {
-          useTerminalStore.getState().updateSessionCurrentDir(session.id, match[1].trim());
+      if (!title || title === lastTitle) return;
+      lastTitle = title;
+
+      const match = title.match(/:\s*(~?\/[^\x07\x1b\r\n]*)/);
+      if (match && match[1]) {
+        const extractedDir = match[1].trim();
+        if (extractedDir !== lastExtractedDir) {
+          lastExtractedDir = extractedDir;
+          useTerminalStore.getState().updateSessionCurrentDir(session.id, extractedDir);
         }
+
+        // Only schedule file tree sync if we have a valid prompt directory match
         if (refreshDebounceTimer) clearTimeout(refreshDebounceTimer);
         refreshDebounceTimer = setTimeout(() => {
           const { rootPath, refreshPath } = useFileTreeStore.getState();
           if (rootPath) {
-            refreshPath(rootPath).catch(() => {});
+            // silent: true prevents Loader2 spinning and file tree flickering
+            refreshPath(rootPath, true).catch(() => {});
           }
-        }, 800);
+        }, 1200);
       }
     });
 
@@ -234,8 +251,8 @@ export const XtermView: React.FC<XtermViewProps> = ({ session, isActive }) => {
         if (term.hasSelection()) {
           const selection = term.getSelection();
           if (selection && selection.length > 0) {
-            navigator.clipboard.writeText(selection).then(() => {
-              triggerCopyFeedback();
+            copyTextToClipboard(selection, { showToast: false }).then((ok) => {
+              if (ok) triggerCopyFeedback();
             }).catch(() => {});
           }
         }

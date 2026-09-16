@@ -28,6 +28,7 @@ import { useLayoutStore } from "../../../stores/layoutStore";
 import { useGitStore } from "../../../stores/gitStore";
 import { useTerminalStore } from "../../../stores/terminalStore";
 import { FileTreeNode } from "./FileTreeNode";
+import { copyTextToClipboard } from "../../../utils/clipboard";
 import { NewItemInput } from "./NewItemInput";
 import { ContextMenu } from "../ContextMenu";
 import { OpenFolderModal } from "./OpenFolderModal";
@@ -1170,8 +1171,8 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
           onNewFile={() => setCreatingType("file")}
           onNewFolder={() => setCreatingType("dir")}
           onRefresh={handleRefresh}
-          onCopyPath={() => navigator.clipboard.writeText(rootPath)}
-          onCopyRelativePath={() => navigator.clipboard.writeText(".")}
+          onCopyPath={() => copyTextToClipboard(rootPath || "", { toastLabel: `已复制工作区路径: ${rootPath}` })}
+          onCopyRelativePath={() => copyTextToClipboard(".", { toastLabel: "已复制相对路径: ." })}
           onOpenInTerminal={() => {
             const { activeSessionId, sendDataToActiveTerminal, addSession, sessions } = useTerminalStore.getState();
             useLayoutStore.getState().setTerminalOpen(true);

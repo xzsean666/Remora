@@ -38,7 +38,7 @@ interface FileTreeState {
   closeWorkspace: () => void;
   loadRecentProjects: () => Promise<void>;
   removeRecentProject: (id: string) => Promise<void>;
-  loadDirectory: (dirPath: string) => Promise<void>;
+  loadDirectory: (dirPath: string, silent?: boolean) => Promise<void>;
   toggleExpand: (dirPath: string) => Promise<void>;
   collapseAll: () => void;
   setSelectedPath: (path: string | null) => void;
@@ -52,7 +52,7 @@ interface FileTreeState {
   createDir: (parentPath: string, name: string) => Promise<void>;
   renameItem: (oldPath: string, newName: string) => Promise<void>;
   deleteItem: (path: string, isDir: boolean, permanent?: boolean) => Promise<void>;
-  refreshPath: (path: string) => Promise<void>;
+  refreshPath: (path: string, silent?: boolean) => Promise<void>;
   restoreLastWorkspace: () => Promise<void>;
 }
 
@@ -217,7 +217,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     });
   },
 
-  loadDirectory: async (dirPath: string) => {
+  loadDirectory: async (dirPath: string, silent = false) => {
     let serverId = get().currentServerId;
     if (!serverId) {
       serverId = useConnectionStore.getState().activeServerId;
@@ -227,14 +227,16 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     }
     if (!serverId) return;
 
-    set((state) => {
-      const nextErrors = { ...state.dirErrors };
-      delete nextErrors[dirPath];
-      return {
-        loadingPaths: Array.from(new Set([...state.loadingPaths, dirPath])),
-        dirErrors: nextErrors,
-      };
-    });
+    if (!silent) {
+      set((state) => {
+        const nextErrors = { ...state.dirErrors };
+        delete nextErrors[dirPath];
+        return {
+          loadingPaths: Array.from(new Set([...state.loadingPaths, dirPath])),
+          dirErrors: nextErrors,
+        };
+      });
+    }
 
     try {
       const entries = await invoke<FileEntry[]>("sftp_read_dir", {
@@ -442,7 +444,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     await get().loadDirectory(parentPath);
   },
 
-  refreshPath: async (path: string) => {
+  refreshPath: async (path: string, silent = false) => {
     let serverId = get().currentServerId;
     if (!serverId) {
       serverId = useConnectionStore.getState().activeServerId;
@@ -456,7 +458,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     const cleanPath = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
 
     // 1. Refresh target directory first
-    await get().loadDirectory(cleanPath);
+    await get().loadDirectory(cleanPath, silent);
 
     // 2. Also refresh all currently expanded subdirectories under this path
     const { expandedPaths } = get();
@@ -468,7 +470,7 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
     // Sequentially await refreshing expanded subdirectories to avoid SFTP mutex thrashing
     for (const subPath of subPaths) {
       try {
-        await get().loadDirectory(subPath);
+        await get().loadDirectory(subPath, silent);
       } catch (err) {
         console.warn(`Failed to refresh expanded subdirectory ${subPath}:`, err);
       }

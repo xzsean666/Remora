@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import { Copy } from "lucide-react";
 import { ActivityBar } from "./components/ActivityBar/ActivityBar";
 import { SidebarContainer } from "./components/Sidebar/SidebarContainer";
 import { Splitter } from "./components/Layout/Splitter";
@@ -30,6 +31,7 @@ import {
   type UpdateInfo,
 } from "./utils/tauriBridge";
 import { initMobileKeyboardAutoScroll } from "./utils/mobileKeyboard";
+import { subscribeClipboardToast } from "./utils/clipboard";
 
 export default function App() {
   const {
@@ -57,6 +59,21 @@ export default function App() {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [manualCheckMsg, setManualCheckMsg] = useState<string | null>(null);
+
+  // Global Clipboard Toast
+  const [clipboardToast, setClipboardToast] = useState<string | null>(null);
+  const clipboardToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return subscribeClipboardToast((msg, duration = 1500) => {
+      if (clipboardToastTimerRef.current) clearTimeout(clipboardToastTimerRef.current);
+      setClipboardToast(msg);
+      clipboardToastTimerRef.current = setTimeout(() => {
+        setClipboardToast(null);
+        clipboardToastTimerRef.current = null;
+      }, duration);
+    });
+  }, []);
 
   useEffect(() => {
     loadRecentProjects();
@@ -402,6 +419,14 @@ export default function App() {
 
       {/* Server Overview Details Modal / Bottom Sheet */}
       <ServerOverviewModal />
+
+      {/* Global Copy Feedback Toast */}
+      {clipboardToast && (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-emerald-950/95 border border-emerald-500/60 text-emerald-200 text-xs shadow-2xl backdrop-blur-md select-none animate-in fade-in zoom-in-95 duration-100 max-w-[85vw] pointer-events-none">
+          <Copy className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+          <span className="font-mono text-[11px] font-medium truncate">{clipboardToast}</span>
+        </div>
+      )}
     </div>
   );
 }
