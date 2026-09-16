@@ -15,6 +15,7 @@ interface FileTreeNodeProps {
   level?: number;
   onOpenFile?: (path: string, isPreview?: boolean) => void;
   onInternalDrop?: (e: React.DragEvent, targetDir: string) => void;
+  onPaste?: (targetDir: string) => void;
   filterQuery?: string;
 }
 
@@ -38,6 +39,7 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = React.memo(({
   level = 0,
   onOpenFile,
   onInternalDrop,
+  onPaste,
   filterQuery = "",
 }) => {
   const rootPath = useFileTreeStore((s) => s.rootPath);
@@ -339,6 +341,7 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = React.memo(({
               level={level + 1}
               onOpenFile={onOpenFile}
               onInternalDrop={onInternalDrop}
+              onPaste={onPaste}
               filterQuery={filterQuery}
             />
           ))}
@@ -387,6 +390,7 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = React.memo(({
           onClose={() => setContextMenuPos(null)}
           onNewFile={entry.is_dir ? () => setCreatingType("file") : undefined}
           onNewFolder={entry.is_dir ? () => setCreatingType("dir") : undefined}
+          onPaste={onPaste ? () => onPaste(entry.is_dir ? entry.path : parentPath) : undefined}
           onRename={() => setIsRenaming(true)}
           onDelete={() => requestDelete(entry.path, entry.name, entry.is_dir)}
           onRefresh={entry.is_dir ? () => refreshPath(entry.path) : undefined}

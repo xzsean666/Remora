@@ -28,7 +28,14 @@ import { useLayoutStore } from "../../../stores/layoutStore";
 import { useGitStore } from "../../../stores/gitStore";
 import { useTerminalStore } from "../../../stores/terminalStore";
 import { FileTreeNode } from "./FileTreeNode";
-import { copyTextToClipboard } from "../../../utils/clipboard";
+import {
+  copyTextToClipboard,
+  readClipboardImage,
+  readNativeClipboardImage,
+  blobToBase64,
+  getImageExtension,
+  showClipboardToast,
+} from "../../../utils/clipboard";
 import { NewItemInput } from "./NewItemInput";
 import { ContextMenu } from "../ContextMenu";
 import { OpenFolderModal } from "./OpenFolderModal";
@@ -130,6 +137,8 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
   };
 
   const lastProcessedDropRef = React.useRef<{ key: string; time: number }>({ key: "", time: 0 });
+  const isPastingRef = React.useRef(false);
+  const lastPasteTimeRef = React.useRef(0);
 
   const shouldProcessDrop = (key: string) => {
     const now = Date.now();
@@ -176,6 +185,171 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
 
     if (newConflicts.length > 0) {
       setConflicts((prev) => [...prev, ...newConflicts]);
+    }
+  };
+
+  const handlePasteToDirectory = async (targetDir: string, clipboardEvent?: ClipboardEvent) => {
+    const targetServer = currentServerId || activeServerId;
+    if (!targetServer) {
+      showClipboardToast("请先连接 SSH 服务器");
+      return;
+    }
+    const cleanTargetDir = targetDir.replace(/\/+$/, "");
+    if (!cleanTargetDir) return;
+
+    const now = Date.now();
+    if (isPastingRef.current || now - lastPasteTimeRef.current < 400) {
+      if (clipboardEvent) {
+        clipboardEvent.preventDefault();
+      }
+      return;
+    }
+
+    isPastingRef.current = true;
+    try {
+      let handled = false;
+
+      // 1. Priority 1: Check native OS clipboard (supports Slack, WeChat, snipping tools, browser copy without webview permission issues)
+      try {
+        const nativeImg = await readNativeClipboardImage();
+        if (nativeImg && nativeImg.base64Data) {
+          if (clipboardEvent) {
+            clipboardEvent.preventDefault();
+          }
+          const ext = getImageExtension(nativeImg.mimeType || "image/png");
+          const finalName = useFileTreeStore
+            .getState()
+            .getNextAvailableImageName(cleanTargetDir, "image", ext);
+          await useFileTreeStore.getState().writeBinaryFile(cleanTargetDir, finalName, nativeImg.base64Data);
+          showClipboardToast(`已粘贴图片: ${finalName}`);
+          handled = true;
+        }
+      } catch (nativeErr) {
+        console.warn("readNativeClipboardImage error:", nativeErr);
+      }
+
+      // 2. If not handled yet and triggered by a ClipboardEvent, examine clipboardData
+      if (!handled && clipboardEvent?.clipboardData) {
+        const data = clipboardEvent.clipboardData;
+
+        // 2a. Check for image items in clipboardData.items
+        if (data.items && data.items.length > 0) {
+          for (let i = 0; i < data.items.length; i++) {
+            const item = data.items[i];
+            if (item.type.startsWith("image/")) {
+              const blob = item.getAsFile();
+              if (blob) {
+                clipboardEvent.preventDefault();
+                try {
+                  const ext = getImageExtension(blob.type || item.type || "image/png");
+                  const finalName = useFileTreeStore
+                    .getState()
+                    .getNextAvailableImageName(cleanTargetDir, "image", ext);
+                  const base64Data = await blobToBase64(blob);
+                  await useFileTreeStore.getState().writeBinaryFile(cleanTargetDir, finalName, base64Data);
+                  showClipboardToast(`已粘贴图片: ${finalName}`);
+                  handled = true;
+                  break;
+                } catch (err) {
+                  console.error("Failed to paste image from clipboard items:", err);
+                  showClipboardToast(`粘贴失败: ${formatErrorMessage(err)}`);
+                }
+              }
+            }
+          }
+        }
+
+        // 2b. If not handled yet, check for copied local files in clipboardData.files
+        if (!handled && data.files && data.files.length > 0) {
+          const localPaths: string[] = [];
+          const memoryFiles: File[] = [];
+
+          for (let i = 0; i < data.files.length; i++) {
+            const f = data.files[i];
+            const localPath = (f as any).path;
+            if (localPath) {
+              localPaths.push(localPath);
+            } else {
+              memoryFiles.push(f);
+            }
+          }
+
+          if (localPaths.length > 0) {
+            clipboardEvent.preventDefault();
+            await handleDroppedPaths(localPaths, cleanTargetDir);
+            handled = true;
+          } else if (memoryFiles.length > 0) {
+            clipboardEvent.preventDefault();
+            for (const mf of memoryFiles) {
+              try {
+                const base64Data = await blobToBase64(mf);
+                const isImg = mf.type.startsWith("image/");
+                let finalName = mf.name;
+                if (!finalName || finalName === "image.png") {
+                  const ext = isImg ? getImageExtension(mf.type) : ".bin";
+                  finalName = useFileTreeStore.getState().getNextAvailableImageName(cleanTargetDir, "image", ext);
+                }
+                await useFileTreeStore.getState().writeBinaryFile(cleanTargetDir, finalName, base64Data);
+                showClipboardToast(`已粘贴文件: ${finalName}`);
+                handled = true;
+              } catch (err) {
+                console.error("Failed to paste memory file:", err);
+              }
+            }
+          }
+        }
+
+        // 2c. If still not handled, check text for Data URL (data:image/...) or file URI
+        if (!handled) {
+          const text = data.getData("text/plain")?.trim();
+          if (text) {
+            if (text.startsWith("data:image/")) {
+              clipboardEvent.preventDefault();
+              const match = text.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+              if (match) {
+                const mime = match[1];
+                const b64 = match[2];
+                const ext = getImageExtension(mime);
+                const finalName = useFileTreeStore.getState().getNextAvailableImageName(cleanTargetDir, "image", ext);
+                await useFileTreeStore.getState().writeBinaryFile(cleanTargetDir, finalName, b64);
+                showClipboardToast(`已粘贴图片: ${finalName}`);
+                handled = true;
+              }
+            } else if (text.startsWith("file://")) {
+              clipboardEvent.preventDefault();
+              const localPath = decodeURIComponent(text.replace(/^file:\/\//, ""));
+              await handleDroppedPaths([localPath], cleanTargetDir);
+              handled = true;
+            }
+          }
+        }
+      }
+
+      // 3. Fallback: navigator.clipboard API
+      if (!handled) {
+        try {
+          const clipImage = await readClipboardImage();
+          if (clipImage) {
+            const ext = getImageExtension(clipImage.mimeType || "image/png");
+            const finalName = useFileTreeStore
+              .getState()
+              .getNextAvailableImageName(cleanTargetDir, "image", ext);
+            const base64Data = await blobToBase64(clipImage.blob);
+            await useFileTreeStore.getState().writeBinaryFile(cleanTargetDir, finalName, base64Data);
+            showClipboardToast(`已粘贴图片: ${finalName}`);
+            handled = true;
+          }
+        } catch (err) {
+          console.warn("readClipboardImage failed:", err);
+        }
+      }
+
+      if (!handled && !clipboardEvent) {
+        showClipboardToast("剪贴板中未找到图片或文件");
+      }
+    } finally {
+      isPastingRef.current = false;
+      lastPasteTimeRef.current = Date.now();
     }
   };
 
@@ -376,6 +550,83 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
       isCancelled = true;
       if (unlisten) unlisten();
       setDragOverPath(null);
+    };
+  }, [rootPath, currentServerId, activeServerId]);
+
+  // Global Paste & Keyboard shortcut listener (Ctrl+V / Cmd+V)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) {
+        const activeEl = document.activeElement;
+        const isEditable =
+          activeEl &&
+          (activeEl.tagName === "INPUT" ||
+            activeEl.tagName === "TEXTAREA" ||
+            (activeEl as HTMLElement).isContentEditable ||
+            activeEl.closest(".cm-editor") ||
+            activeEl.closest(".xterm") ||
+            activeEl.closest("[data-terminal-container]"));
+
+        if (isEditable) {
+          return;
+        }
+
+        e.preventDefault();
+
+        if (!rootPath) return;
+
+        const { selectedPath, tree } = useFileTreeStore.getState();
+        let targetDir = rootPath;
+        if (selectedPath) {
+          if (tree[selectedPath]) {
+            targetDir = selectedPath;
+          } else {
+            const parent = selectedPath.substring(0, selectedPath.lastIndexOf("/")) || rootPath;
+            targetDir = parent;
+          }
+        }
+
+        handlePasteToDirectory(targetDir);
+      }
+    };
+
+    const handleWindowPaste = (e: ClipboardEvent) => {
+      const activeEl = document.activeElement;
+      const isEditable =
+        activeEl &&
+        (activeEl.tagName === "INPUT" ||
+          activeEl.tagName === "TEXTAREA" ||
+          (activeEl as HTMLElement).isContentEditable ||
+          activeEl.closest(".cm-editor") ||
+          activeEl.closest(".xterm") ||
+          activeEl.closest("[data-terminal-container]"));
+
+      if (isEditable) {
+        return;
+      }
+
+      if (!rootPath) return;
+
+      const { selectedPath, tree } = useFileTreeStore.getState();
+      let targetDir = rootPath;
+      if (selectedPath) {
+        if (tree[selectedPath]) {
+          targetDir = selectedPath;
+        } else {
+          const parent = selectedPath.substring(0, selectedPath.lastIndexOf("/")) || rootPath;
+          targetDir = parent;
+        }
+      }
+
+      handlePasteToDirectory(targetDir, e);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("paste", handleWindowPaste);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("paste", handleWindowPaste);
     };
   }, [rootPath, currentServerId, activeServerId]);
 
@@ -1140,6 +1391,7 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
                 level={0}
                 onOpenFile={onOpenFile}
                 onInternalDrop={handleInternalDrop}
+                onPaste={(targetDir) => handlePasteToDirectory(targetDir)}
                 filterQuery={filterQuery}
               />
             ))}
@@ -1181,6 +1433,7 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
           onClose={() => setContextMenuPos(null)}
           onNewFile={() => setCreatingType("file")}
           onNewFolder={() => setCreatingType("dir")}
+          onPaste={() => handlePasteToDirectory(rootPath)}
           onRefresh={handleRefresh}
           onCopyPath={() => copyTextToClipboard(rootPath || "", { toastLabel: `已复制工作区路径: ${rootPath}` })}
           onCopyRelativePath={() => copyTextToClipboard(".", { toastLabel: "已复制相对路径: ." })}

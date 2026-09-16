@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { FilePlus, FolderPlus, Edit2, Trash2, Copy, RefreshCw, Download, Terminal } from "lucide-react";
+import { FilePlus, FolderPlus, Edit2, Trash2, Copy, RefreshCw, Download, Terminal, ClipboardPaste } from "lucide-react";
 
 export interface ContextMenuAction {
   label: string;
@@ -14,6 +14,7 @@ interface ContextMenuProps {
   onClose: () => void;
   onNewFile?: () => void;
   onNewFolder?: () => void;
+  onPaste?: () => void | Promise<any>;
   onRename?: () => void;
   onDelete?: () => void;
   onRefresh?: () => void;
@@ -30,6 +31,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onClose,
   onNewFile,
   onNewFolder,
+  onPaste,
   onRename,
   onDelete,
   onRefresh,
@@ -63,7 +65,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
 
   // Adjust coordinates if menu overflows window
   const menuWidth = 192;
-  const menuHeight = 220;
+  const menuHeight = 260;
   const adjustedX = Math.max(8, Math.min(x, window.innerWidth - menuWidth - 8));
   const adjustedY = Math.max(8, Math.min(y, window.innerHeight - menuHeight - 8));
 
@@ -99,7 +101,26 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         </button>
       )}
 
-      {(isDir && (onNewFile || onNewFolder)) && (
+      {onPaste && (
+        <button
+          onClick={async () => {
+            try {
+              await onPaste();
+            } finally {
+              onClose();
+            }
+          }}
+          className="w-full px-3 py-1.5 flex items-center justify-between hover:bg-vscode-selected hover:text-white transition-colors text-left"
+        >
+          <div className="flex items-center gap-2">
+            <ClipboardPaste className="w-4 h-4 opacity-80" />
+            <span>Paste (粘贴)</span>
+          </div>
+          <span className="text-[10px] text-vscode-textMuted opacity-70 font-mono">Ctrl+V</span>
+        </button>
+      )}
+
+      {((isDir && (onNewFile || onNewFolder)) || onPaste) && (
         <div className="my-1 border-t border-vscode-border/60" />
       )}
 

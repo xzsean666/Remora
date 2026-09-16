@@ -50,6 +50,8 @@ interface FileTreeState {
   moveItem: (oldPath: string, targetDir: string, newName?: string, overwrite?: boolean) => Promise<void>;
   createFile: (parentPath: string, name: string) => Promise<void>;
   createDir: (parentPath: string, name: string) => Promise<void>;
+  writeBinaryFile: (parentPath: string, fileName: string, dataBase64: string) => Promise<string>;
+  getNextAvailableImageName: (parentPath: string, baseName?: string, extension?: string) => string;
   renameItem: (oldPath: string, newName: string) => Promise<void>;
   deleteItem: (path: string, isDir: boolean, permanent?: boolean) => Promise<void>;
   refreshPath: (path: string, silent?: boolean) => Promise<void>;
@@ -414,6 +416,49 @@ export const useFileTreeStore = create<FileTreeState>((set, get) => ({
       expandedPaths: Array.from(new Set([...state.expandedPaths, parentPath])),
       selectedPath: fullPath,
     }));
+  },
+
+  getNextAvailableImageName: (parentPath: string, baseName = "image", extension = ".png"): string => {
+    const cleanExt = extension.startsWith(".") ? extension : `.${extension}`;
+    const cleanBase = baseName.replace(/\.[^/.]+$/, "");
+    const entries = get().tree[parentPath] || [];
+    const existingNames = new Set(entries.map((e) => e.name.toLowerCase()));
+
+    const initialCandidate = `${cleanBase}${cleanExt}`;
+    if (!existingNames.has(initialCandidate.toLowerCase())) {
+      return initialCandidate;
+    }
+
+    let index = 1;
+    while (true) {
+      const candidate = `${cleanBase}-${index}${cleanExt}`;
+      if (!existingNames.has(candidate.toLowerCase())) {
+        return candidate;
+      }
+      index++;
+    }
+  },
+
+  writeBinaryFile: async (parentPath: string, fileName: string, dataBase64: string): Promise<string> => {
+    const { currentServerId } = get();
+    if (!currentServerId) throw new Error("No connected server / 未连接远程服务器");
+
+    const cleanParent = parentPath.replace(/\/+$/, "");
+    const fullPath = `${cleanParent}/${fileName}`;
+
+    await invoke("sftp_write_binary_file", {
+      serverId: currentServerId,
+      path: fullPath,
+      dataBase64,
+    });
+
+    await get().loadDirectory(parentPath);
+    set((state) => ({
+      expandedPaths: Array.from(new Set([...state.expandedPaths, parentPath])),
+      selectedPath: fullPath,
+    }));
+
+    return fullPath;
   },
 
   renameItem: async (oldPath: string, newName: string) => {

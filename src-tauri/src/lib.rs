@@ -399,6 +399,85 @@ async fn sftp_write_file(
 }
 
 #[tauri::command]
+async fn sftp_write_binary_file(
+    server_id: String,
+    path: String,
+    data_base64: String,
+    state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
+) -> Result<()> {
+    let _ = ensure_server_connected(&server_id, &state, Some(&app)).await;
+
+    match state
+        .sftp
+        .write_binary_file(&server_id, &path, &data_base64)
+        .await
+    {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            tracing::warn!(
+                "sftp_write_binary_file initial attempt failed for {} at {}: {}. Attempting auto-reconnect...",
+                server_id,
+                path,
+                e
+            );
+            state.sftp.close_session(&server_id).await;
+            do_connect_server(&server_id, &state, Some(&app)).await?;
+            state
+                .sftp
+                .write_binary_file(&server_id, &path, &data_base64)
+                .await
+        }
+    }
+}
+
+pub fn encode_rgba_to_png_base64(width: u32, height: u32, rgba_bytes: &[u8]) -> Result<String> {
+    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+    use base64::Engine;
+
+    let mut png_bytes = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png_bytes, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| AppError::Internal(format!("PNG header error: {}", e)))?;
+        writer
+            .write_image_data(rgba_bytes)
+            .map_err(|e| AppError::Internal(format!("PNG write error: {}", e)))?;
+    }
+    Ok(BASE64_STANDARD.encode(&png_bytes))
+}
+
+#[tauri::command]
+async fn read_clipboard_image_native() -> Result<Option<String>> {
+    tokio::task::spawn_blocking(|| {
+        let mut cb = match arboard::Clipboard::new() {
+            Ok(cb) => cb,
+            Err(e) => {
+                tracing::warn!("Failed to initialize native clipboard: {}", e);
+                return Ok(None);
+            }
+        };
+
+        match cb.get_image() {
+            Ok(img) => {
+                let b64 = encode_rgba_to_png_base64(img.width as u32, img.height as u32, &img.bytes)?;
+                Ok(Some(b64))
+            }
+            Err(arboard::Error::ContentNotAvailable) => Ok(None),
+            Err(e) => {
+                tracing::debug!("Clipboard does not contain image: {}", e);
+                Ok(None)
+            }
+        }
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("Clipboard task join error: {}", e)))?
+}
+
+#[tauri::command]
 async fn sftp_create_file(
     server_id: String,
     path: String,
@@ -971,6 +1050,14 @@ fi"#,
         }
     }
 
+    if branches.is_empty() {
+        if let Some(ref cur) = current_branch {
+            if !cur.is_empty() && cur != "HEAD" {
+                branches.push(cur.clone());
+            }
+        }
+    }
+
     Ok(GitStatusResult {
         is_repo: true,
         current_branch,
@@ -1121,8 +1208,9 @@ async fn git_get_diff(
     let safe_path = repo_path.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
     let safe_file = file_path.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
     let cmd = format!(
-        "git -C \"{}\" diff HEAD -- \"{}\" 2>&1 || git -C \"{}\" diff -- \"{}\"",
-        safe_path, safe_file, safe_path, safe_file
+        "git -C \"{path}\" diff HEAD -- \"{file}\" 2>/dev/null || git -C \"{path}\" diff --cached -- \"{file}\" 2>/dev/null || git -C \"{path}\" diff -- \"{file}\" 2>&1",
+        path = safe_path,
+        file = safe_file
     );
 
     let output = state.connection.exec_command(&server_id, &cmd).await?;
@@ -1145,24 +1233,64 @@ async fn git_commit(
     let b64_msg = base64::prelude::BASE64_STANDARD.encode(message.as_bytes());
 
     let do_stage = stage_all.unwrap_or(true);
-    let cmd = if do_stage {
-        format!(
-            "git -C \"{path}\" add -A && echo \"{b64}\" | base64 -d | git -C \"{path}\" commit -F - 2>&1",
-            path = safe_path,
-            b64 = b64_msg
-        )
+    let stage_part = if do_stage {
+        format!("git -C \"{}\" add -A 2>&1 || true\n", safe_path)
     } else {
-        format!(
-            "echo \"{b64}\" | base64 -d | git -C \"{path}\" commit -F - 2>&1",
-            path = safe_path,
-            b64 = b64_msg
-        )
+        String::new()
     };
+
+    let cmd = format!(
+        r#"
+if ! git -C "{path}" config user.name >/dev/null 2>&1; then
+    GH_USER=$(gh api user --jq .login 2>/dev/null || echo "")
+    if [ -n "$GH_USER" ]; then
+        git -C "{path}" config user.name "$GH_USER"
+    elif [[ "{path}" == *"/ssd0/git"* ]]; then
+        git -C "{path}" config user.name "xzsean666"
+    elif [[ "{path}" == *"/ssd0/ems"* ]]; then
+        git -C "{path}" config user.name "0xcube-666"
+    fi
+fi
+if ! git -C "{path}" config user.email >/dev/null 2>&1; then
+    GH_EMAIL=$(gh api user --jq '"\(.id)+\(.login)@users.noreply.github.com"' 2>/dev/null || echo "")
+    if [ -n "$GH_EMAIL" ]; then
+        git -C "{path}" config user.email "$GH_EMAIL"
+    else
+        GH_USER=$(git -C "{path}" config user.name 2>/dev/null || echo "")
+        if [ "$GH_USER" = "xzsean666" ]; then
+            git -C "{path}" config user.email "85156828+xzsean666@users.noreply.github.com"
+        elif [ "$GH_USER" = "0xcube-666" ]; then
+            git -C "{path}" config user.email "312491237+0xcube-666@users.noreply.github.com"
+        elif [ -n "$GH_USER" ]; then
+            git -C "{path}" config user.email "${{GH_USER}}@users.noreply.github.com"
+        fi
+    fi
+fi
+{stage_part}echo "{b64}" | base64 -d | git -C "{path}" commit -F - 2>&1
+EXIT_CODE=$?
+if [ $EXIT_CODE -ne 0 ]; then
+    echo "===REMORA_GIT_ERR:$EXIT_CODE==="
+fi
+"#,
+        path = safe_path,
+        stage_part = stage_part,
+        b64 = b64_msg
+    );
 
     let output = state
         .connection
         .exec_command_with_timeout(&server_id, &cmd, std::time::Duration::from_secs(15))
         .await?;
+
+    if let Some(pos) = output.find("===REMORA_GIT_ERR:") {
+        let err_detail = output[..pos].trim();
+        return Err(AppError::Internal(if err_detail.is_empty() {
+            "Git commit 失败 (未知错误)".to_string()
+        } else {
+            err_detail.to_string()
+        }));
+    }
+
     Ok(output)
 }
 
@@ -1174,13 +1302,29 @@ async fn git_push(
 ) -> Result<String> {
     let safe_path = repo_path.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
     let cmd = format!(
-        "git -C \"{path}\" push 2>&1 || git -C \"{path}\" push -u origin HEAD 2>&1",
+        r#"
+(git -C "{path}" push 2>&1 || git -C "{path}" push -u origin HEAD 2>&1)
+EXIT_CODE=$?
+if [ $EXIT_CODE -ne 0 ]; then
+    echo "===REMORA_GIT_ERR:$EXIT_CODE==="
+fi
+"#,
         path = safe_path
     );
     let output = state
         .connection
         .exec_command_with_timeout(&server_id, &cmd, std::time::Duration::from_secs(35))
         .await?;
+
+    if let Some(pos) = output.find("===REMORA_GIT_ERR:") {
+        let err_detail = output[..pos].trim();
+        return Err(AppError::Internal(if err_detail.is_empty() {
+            "Git push 失败".to_string()
+        } else {
+            err_detail.to_string()
+        }));
+    }
+
     Ok(output)
 }
 
@@ -1191,11 +1335,30 @@ async fn git_pull(
     state: State<'_, Arc<AppState>>,
 ) -> Result<String> {
     let safe_path = repo_path.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
-    let cmd = format!("git -C \"{}\" pull 2>&1", safe_path);
+    let cmd = format!(
+        r#"
+git -C "{path}" pull 2>&1
+EXIT_CODE=$?
+if [ $EXIT_CODE -ne 0 ]; then
+    echo "===REMORA_GIT_ERR:$EXIT_CODE==="
+fi
+"#,
+        path = safe_path
+    );
     let output = state
         .connection
         .exec_command_with_timeout(&server_id, &cmd, std::time::Duration::from_secs(35))
         .await?;
+
+    if let Some(pos) = output.find("===REMORA_GIT_ERR:") {
+        let err_detail = output[..pos].trim();
+        return Err(AppError::Internal(if err_detail.is_empty() {
+            "Git pull 失败".to_string()
+        } else {
+            err_detail.to_string()
+        }));
+    }
+
     Ok(output)
 }
 
@@ -1207,13 +1370,29 @@ async fn git_sync(
 ) -> Result<String> {
     let safe_path = repo_path.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
     let cmd = format!(
-        "git -C \"{path}\" pull 2>&1 && (git -C \"{path}\" push 2>&1 || git -C \"{path}\" push -u origin HEAD 2>&1)",
+        r#"
+(git -C "{path}" pull 2>&1 && (git -C "{path}" push 2>&1 || git -C "{path}" push -u origin HEAD 2>&1))
+EXIT_CODE=$?
+if [ $EXIT_CODE -ne 0 ]; then
+    echo "===REMORA_GIT_ERR:$EXIT_CODE==="
+fi
+"#,
         path = safe_path
     );
     let output = state
         .connection
         .exec_command_with_timeout(&server_id, &cmd, std::time::Duration::from_secs(45))
         .await?;
+
+    if let Some(pos) = output.find("===REMORA_GIT_ERR:") {
+        let err_detail = output[..pos].trim();
+        return Err(AppError::Internal(if err_detail.is_empty() {
+            "Git sync 失败".to_string()
+        } else {
+            err_detail.to_string()
+        }));
+    }
+
     Ok(output)
 }
 
@@ -1225,7 +1404,7 @@ async fn git_get_summary_diff(
 ) -> Result<String> {
     let safe_path = repo_path.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
     let cmd = format!(
-        r#"echo "===STATUS==="; git -C "{path}" status --short 2>&1; echo "===DIFF==="; git -C "{path}" diff HEAD 2>&1 | head -c 4000 || git -C "{path}" diff 2>&1 | head -c 4000"#,
+        r#"echo "===STATUS==="; git -C "{path}" status --short 2>&1; echo "===DIFF==="; (git -C "{path}" diff HEAD 2>/dev/null || git -C "{path}" diff --cached 2>/dev/null || git -C "{path}" diff 2>/dev/null) | head -c 4000"#,
         path = safe_path
     );
     let output = state
@@ -1461,6 +1640,8 @@ pub fn run() {
             sftp_read_file,
             sftp_read_binary_file,
             sftp_write_file,
+            sftp_write_binary_file,
+            read_clipboard_image_native,
             sftp_create_file,
             sftp_create_dir,
             sftp_rename,
@@ -1507,6 +1688,26 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_encode_rgba_to_png_base64() {
+        use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+        use base64::Engine;
+
+        // 2x2 RGBA image (red, green, blue, white)
+        let rgba = vec![
+            255, 0, 0, 255,   // Red
+            0, 255, 0, 255,   // Green
+            0, 0, 255, 255,   // Blue
+            255, 255, 255, 255, // White
+        ];
+        let res = encode_rgba_to_png_base64(2, 2, &rgba).expect("encode failed");
+        assert!(!res.is_empty());
+
+        let decoded = BASE64_STANDARD.decode(&res).expect("decode failed");
+        // PNG magic number: 0x89 0x50 0x4E 0x47 0x0D 0x0A 0x1A 0x0A
+        assert_eq!(&decoded[0..8], b"\x89PNG\r\n\x1a\n");
+    }
 
     #[test]
     fn test_parse_gh_auth_status() {

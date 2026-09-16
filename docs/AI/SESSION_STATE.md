@@ -5,56 +5,50 @@
 ---
 
 ## 1. 当前目标与任务
-- **当前 Goal**: 适配私有部署模型生成 Commit Message 并保留 OpenRouter 兼容支持 (Adapt Self-Hosted Model for AI Commit Generation while Preserving OpenRouter Compatibility)
+- **当前 Goal**: 优化 build.sh release 构建归档逻辑 (按需精准产物归档、去重与清理)
 - **当前 Task**: 
-  - TASK-063: 适配私有部署模型生成 Commit Message 并保留 OpenRouter 兼容支持 (Adapt Self-Hosted Model for AI Commit Generation while Preserving OpenRouter Compatibility) [DONE]
-- **当前状态**: DONE (全部验收标准满足，私有模型与 OpenRouter 双端真实 Commit 生成验证通过，前端 TypeScript 严格检查 0 报错，生产构建 100% 成功，34 个 Rust 单元测试 + 1 个 E2E 测试全量通过)
+  - TASK-066: 优化 build.sh release 构建归档逻辑 (按需精准产物归档、去重与清理) [DONE]
+- **当前状态**: DONE (全部验收标准满足，彻底根除物理双重复制与历史版本堆积缺陷；在 `--deb` 模式下仅生成并归档当前版本的 `.deb` 文件与 `SHA256SUMS.txt`；废除 `ARCH_RELEASE_DIR` 双重物理目录；`--no-bundle` 模式通过软链接创建版本别名杜绝 30MB 重复二进制；`release/` 总目录体积从 904MB 骤降至 41MB，脚本实测构建 100% 成功)
 
 ---
 
 ## 2. 本次会话完成内容
 
-1. **私有模型环境变量配置与多层级回退 (`.env` & `.env.example` & `vite.config.ts`)**:
-   - 在 `.env` 中按用户规范配置私有大模型参数（通过 Cloudflare Tunnel + 本地 Nginx 反代 80 端口）：
-     - `AI_API_KEY=sk-058cecae64c87a69c5c62c0676f2adf69328c1d042d677f5`
-     - `AI_BASE_URL=https://server-10001.002788.xyz/v1`
-     - `AI_MODEL=qwen3.5:2b-optimized`
-   - Cloudflare Tunnel 已成功指向宿主机 Nginx 80 端口（`http://192.168.31.110:80`），经实测 401 鉴权门禁与 Lua 极速出词全部在公网生效；
-   - 宿主机临时开的 `10001` 端口已安全关停，完全恢复纯正内部反代安全架构；
-   - 完整保留 `OPEN_ROUTER_API_KEY`，并在 `vite.config.ts` 中重构解析逻辑：优先读取 `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL`；若用户仅配置 `OPEN_ROUTER_API_KEY`，则智能平滑回退至 OpenRouter 官方端点与免费模型；并在 `.env.example` 中补充双模配置指引。
+1. **构建模式与产物归档按需解耦 (`build.sh`)**:
+   - 彻底修复无论构建何种目标都无条件向 `release/desktop/` 拷贝两份 30MB 独立二进制（`remora` 与 `remora-linux_x64-v*`）的缺陷；
+   - 在 `--deb` 模式下，构建前自动清理 `target/release/bundle/deb`，构建完成后**仅**归档当前版本的 `Remora_${APP_VERSION}_*.deb`、对应签名（若有）及 `SHA256SUMS.txt`，绝不拷贝未打包的独立二进制；
+   - 在 `--no-bundle` 独立二进制模式下，仅归档 `remora` 主执行文件，并通过软链接 `ln -sf remora remora-${TARGET_NAME}-v${APP_VERSION}` 创建版本别名，零空间开销杜绝双倍物理存储。
 
-2. **双轨模型分流与智能适配引擎 (`src/services/aiCommitService.ts`)**:
-   - 针对 `baseUrl` 进行智能识别（`baseUrl.toLowerCase().includes("openrouter.ai")`）；
-   - **OpenRouter 模式**：保留其专属头部（`HTTP-Referer`、`X-Title`）与专属推理压制参数（`"reasoning": { "max_tokens": 0 }`）；
-   - **自建 / OpenAI 兼容模式**：移除 OpenRouter 专有头部，注入 `reasoning_effort: "none"`，彻底杜绝 Qwen3.5 / Ollama 将思考内容写进 `reasoning` 耗尽 token 导致正文空白的问题；
-   - 适当放宽 `max_tokens` 至 300，增强大改动提交容错；
-   - 增加双向流式（SSE）与非流式（JSON）双模解析支持，并增加 `reasoning` 容灾回退提取；
-   - 保持严格规范的 Conventional Commit 提取清洗（自动去除 `<think>` 标签、Markdown 代码栅栏、外层引号与 `git commit -m` 前缀）。
+2. **彻底废除 `ARCH_RELEASE_DIR` 双重目录嵌套 (`build.sh`)**:
+   - 移除 `ARCH_RELEASE_DIR="${SCRIPT_DIR}/release/desktop/${TARGET_NAME}"` 以及所有向该子目录写入的 `cp -f` 与校验和逻辑；
+   - 清理磁盘上已存在的 `release/desktop/linux_x64` 冗余目录（避免单次构建多出 255MB+ 重复文件）；
+   - 保留顶层软链接 `release/linux_x64 -> desktop`，确保与任何依赖旧路径脚本或习惯的 100% 向下兼容。
 
-3. **可视化配置弹窗便捷预设与一键切换 (`src/components/Sidebar/Git/AiConfigModal.tsx`)**:
-   - 默认重置值与当前构建/环境变量联动；
-   - 增加 `qwen3.5:2b (自建)`、`nemotron-3.5 (OpenRouter)` 与 `gemma-4-31b (OpenRouter)` 快捷预设按钮，点击可自动填充模型名称并智能适配对应的 Base URL；
-   - 优化 API Key 与 Base URL 的表单说明文案与占位提示。
+3. **历史版本全量遍历拷贝治理与构建前清理 (`build.sh`)**:
+   - 修复原脚本 `find "${BUNDLE_DIR}/deb"` 无版本过滤导致 0.1.11 ~ 0.1.23 全量历史 deb 包被无休止重复复制到 `release/desktop/` 的严重缺陷；
+   - 引入版本号精确匹配：`*${APP_VERSION}*.deb`；
+   - 构建前自动清理 `bundle/` 对应格式目录与 `release/desktop/` 内的异构与旧包；
+   - 优化 Android APK 归档，仅保留规范版本命名的单一 APK，取消重复的无版本号 legacy APK 物理拷贝。
 
 ---
 
 ## 3. 修改与创建的文件
 - **新建文件**:
-  - `docs/AI/tasks/TASK-063.md`
+  - `docs/AI/tasks/TASK-066.md`
 - **修改文件**:
-  - `.env`
-  - `.env.example`
-  - `vite.config.ts`
-  - `src/services/aiCommitService.ts`
-  - `src/components/Sidebar/Git/AiConfigModal.tsx`
+  - `build.sh`
   - `docs/AI/TASK_INDEX.md`
   - `docs/AI/SESSION_STATE.md`
 
 ---
 
 ## 4. 已运行的验证命令及结果
-- 真实调用私有模型接口 `http://127.0.0.1/v1/chat/completions` 生成 Conventional Commit：中英文均成功输出（耗时 ~1.8s）。
-- 真实调用 OpenRouter 接口验证：兼容性 100% 保持，正常生成 Conventional Commit。
-- `pnpm tsc --noEmit`: 前端 TypeScript 严格检查 0 报错。
-- `pnpm build`: Vite 前端生产打包顺利通过（7.05s，0 语法/类型错误）。
-- `cargo test --manifest-path src-tauri/Cargo.toml`: 34 个单元测试 + 1 个 E2E 集成测试全量 100% 通过（耗时 0.01s）。
+- **脚本语法与结构校验**:
+  - `bash -n build.sh`: 语法检查 0 错误。
+- **DEB 打包模式端到端实测 (`./build.sh --deb --no-bump`)**:
+  - 成功完成生产打包与归档，`release/desktop/` 仅包含 `Remora_0.1.23_amd64.deb` (12MB) 与 `SHA256SUMS.txt`；
+  - 验证绝无独立二进制 `remora`、绝无旧版本 deb、绝无 `linux_x64` 嵌套目录。
+- **独立二进制模式实测 (`./build.sh --no-bundle --no-bump`)**:
+  - 成功编译并归档 `remora` (30MB)，`remora-linux_x64-v0.1.23` 自动创建为软链接，0 重复存储。
+- **磁盘占用大幅缩减**:
+  - `release/` 目录整体磁盘占用由 **904MB** 骤降至 **41MB**（仅包含 12MB DEB 与 29MB Android APK）。

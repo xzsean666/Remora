@@ -121,4 +121,21 @@ mod tests {
         assert_eq!(guess_image_mime("raw_data", b"GIF89a"), "image/gif");
         assert_eq!(guess_image_mime("unknown.bin", b"hello world"), "application/octet-stream");
     }
+
+    #[test]
+    fn test_binary_file_base64_decode() {
+        use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+        use base64::Engine;
+
+        // 1x1 transparent PNG data in Base64
+        let png_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+        let decoded = BASE64_STANDARD.decode(png_base64).expect("Base64 decode should succeed");
+
+        assert!(!decoded.is_empty());
+        assert_eq!(&decoded[0..4], b"\x89PNG");
+
+        // Verify re-encoding matches original
+        let re_encoded = BASE64_STANDARD.encode(&decoded);
+        assert_eq!(re_encoded, png_base64);
+    }
 }

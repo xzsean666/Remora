@@ -202,6 +202,51 @@ impl SftpService {
         })
     }
 
+    pub async fn write_binary_file(
+        &self,
+        server_id: &str,
+        path: &str,
+        data_base64: &str,
+    ) -> Result<()> {
+        let res = self.do_write_binary_file(server_id, path, data_base64).await;
+        if res.is_err() {
+            self.close_session(server_id).await;
+        }
+        res
+    }
+
+    async fn do_write_binary_file(
+        &self,
+        server_id: &str,
+        path: &str,
+        data_base64: &str,
+    ) -> Result<()> {
+        let bytes = BASE64_STANDARD
+            .decode(data_base64)
+            .map_err(|e| AppError::Sftp(format!("Failed to decode base64 binary data: {}", e)))?;
+
+        let session_arc = self.get_or_create_session(server_id).await?;
+        let sftp = session_arc.lock().await;
+
+        let mut file = sftp
+            .open_with_flags(
+                path,
+                OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE,
+            )
+            .await
+            .map_err(|e| AppError::Sftp(format!("Failed to open file for binary writing {}: {}", path, e)))?;
+
+        file.write_all(&bytes)
+            .await
+            .map_err(|e| AppError::Sftp(format!("Failed to write binary content to {}: {}", path, e)))?;
+
+        file.flush()
+            .await
+            .map_err(|e| AppError::Sftp(format!("Failed to flush binary file {}: {}", path, e)))?;
+
+        Ok(())
+    }
+
     pub async fn write_file(
         &self,
         server_id: &str,

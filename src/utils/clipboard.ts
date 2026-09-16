@@ -7,6 +7,8 @@
  * 3. 缺乏复制成功的直观视觉反馈等痛点。
  */
 
+import { safeInvoke } from "./tauriBridge";
+
 // 简单的全局 Toast 广播机制
 type ToastListener = (message: string, duration?: number) => void;
 const toastListeners = new Set<ToastListener>();
@@ -122,4 +124,125 @@ export async function copyTextToClipboard(text: string, options: CopyOptions = {
   }
 
   return success;
+}
+
+/**
+ * 将 Blob / File 转换为纯 Base64 字符串（不含 data:url 前缀）
+ */
+export async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const dataUrl = reader.result as string;
+      const commaIndex = dataUrl.indexOf(",");
+      if (commaIndex !== -1) {
+        resolve(dataUrl.slice(commaIndex + 1));
+      } else {
+        resolve(dataUrl);
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * 根据 MIME 类型推断合适的文件后缀名
+ */
+export function getImageExtension(mimeType: string): string {
+  switch (mimeType.toLowerCase()) {
+    case "image/jpeg":
+    case "image/jpg":
+      return ".jpg";
+    case "image/png":
+      return ".png";
+    case "image/gif":
+      return ".gif";
+    case "image/webp":
+      return ".webp";
+    case "image/svg+xml":
+      return ".svg";
+    case "image/bmp":
+      return ".bmp";
+    case "image/x-icon":
+    case "image/vnd.microsoft.icon":
+      return ".ico";
+    case "image/avif":
+      return ".avif";
+    default:
+      return ".png";
+  }
+}
+
+/**
+ * 从本地/浏览器系统剪贴板中读取图片数据 (Blob 与 MIME)
+ * 优先调用异步 Clipboard API，若不可用则检查纯文本中的 Data URL
+ */
+export async function readClipboardImage(): Promise<{ blob: Blob; mimeType: string } | null> {
+  if (typeof navigator === "undefined" || !navigator.clipboard) {
+    return null;
+  }
+
+  try {
+    if (typeof window !== "undefined" && typeof window.focus === "function") {
+      window.focus();
+    }
+  } catch {}
+
+  // 1. 尝试现代异步 Clipboard API (navigator.clipboard.read)
+  if (typeof navigator.clipboard.read === "function") {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imageType = item.types.find((t) => t.startsWith("image/"));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          return { blob, mimeType: imageType };
+        }
+      }
+    } catch (err) {
+      console.warn("[Clipboard] navigator.clipboard.read failed or not permitted:", err);
+    }
+  }
+
+  // 2. 检查纯文本中是否包含 data:image/xxx;base64,... 图片数据
+  if (typeof navigator.clipboard.readText === "function") {
+    try {
+      const text = await navigator.clipboard.readText();
+      const trimmed = text.trim();
+      if (trimmed.startsWith("data:image/")) {
+        const match = trimmed.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+        if (match) {
+          const mimeType = match[1];
+          const base64Data = match[2];
+          const byteChars = atob(base64Data);
+          const byteNumbers = new Array(byteChars.length);
+          for (let i = 0; i < byteChars.length; i++) {
+            byteNumbers[i] = byteChars.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: mimeType });
+          return { blob, mimeType };
+        }
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
+/**
+ * 优先调用 Tauri 本地原生命令直接从操作系统剪贴板读取图片 Base64 数据 (PNG)
+ * 能够穿透 Webview 沙箱与权限限制，完美支持 Slack、微信、系统截屏、浏览器复制的原生位图
+ */
+export async function readNativeClipboardImage(): Promise<{ base64Data: string; mimeType: string } | null> {
+  try {
+    const res = await safeInvoke<string | null>("read_clipboard_image_native");
+    if (res && typeof res === "string" && res.length > 0) {
+      return { base64Data: res, mimeType: "image/png" };
+    }
+  } catch (err) {
+    console.warn("[Clipboard] read_clipboard_image_native failed:", err);
+  }
+  return null;
 }

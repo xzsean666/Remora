@@ -72,21 +72,27 @@
 | **TASK-061** | 修复文件树路径复制失效保留旧内容与终端联动高频重绘闪烁缺陷 (Fix File Explorer Path Copy Failure & Terminal Title Auto-Refresh Flicker) | TASK-046, TASK-055 | **DONE** | `docs/AI/tasks/TASK-061.md` |
 | **TASK-062** | 彻底根除文件浏览侧边栏在粘贴命令行与窗口聚焦等场景下的频闪与整树重绘缺陷 (Completely Eliminate File Explorer Flickering on Terminal Paste & Window Focus) | TASK-046, TASK-061 | **DONE** | `docs/AI/tasks/TASK-062.md` |
 | **TASK-063** | 适配私有部署模型生成 Commit Message 并保留 OpenRouter 兼容支持 (Adapt Self-Hosted Model for AI Commit Generation while Preserving OpenRouter Compatibility) | TASK-060 | **DONE** | `docs/AI/tasks/TASK-063.md` |
+| **TASK-064** | 修复新仓库执行 Git Commit 无响应问题与作者身份自适应配置 (Fix Git Commit Unresponsive in New Repos & Auto-Configure Author Identity) | TASK-060 | **DONE** | `docs/AI/tasks/TASK-064.md` |
+| **TASK-065** | 远程目录粘贴剪贴板图片与本地文件支持 (Remote Folder Clipboard Image & File Paste Support) | TASK-004, TASK-007, TASK-010, TASK-054 | **DONE** | `docs/AI/tasks/TASK-065.md` |
+| **TASK-066** | 优化 build.sh release 构建归档逻辑 (按需精准产物归档、去重与清理) | TASK-050 | **DONE** | `docs/AI/tasks/TASK-066.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 64
+- **已完成 (DONE)**: 67
 - **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 64
+- **总任务数**: 67
 
 ---
 
 ## 3. 项目执行总结
 
+- **TASK-066** 圆满完成：优化 build.sh release 构建归档逻辑 (按需精准产物归档、去重与清理)。彻底治理 release 目录下冗余文件膨胀与重复拷贝问题：1) **按需模式解耦**：当用户指定 `--deb` 构建时，构建前自动清理 `bundle/deb` 历史残留，构建后**仅**归档当前版本的 `Remora_${APP_VERSION}_*.deb` 及签名和校验和，严禁拷贝未打包的 raw binary (`remora` / `remora-linux_x64-v*`)，不再拷贝历史 AppImage 或旧版本 deb；2) **彻底废除 `ARCH_RELEASE_DIR`**：移除 `release/desktop/linux_x64` 双重物理拷贝目录，顶层维持 `release/linux_x64 -> desktop` 软链接；3) **独立二进制去重**：`--no-bundle` 模式下版本名通过软链接创建，不再物理生成两份 30MB 二进制；4) **Android APK 去重**：仅归档规范版本命名的单一 APK；5) 磁盘占用从 904MB 骤降至 41MB，deb 构建输出 100% 纯净规范。
+- **TASK-065** 圆满完成：远程目录粘贴剪贴板图片与本地文件支持 (Remote Folder Clipboard Image & File Paste Support)。核心落地四大功能：1) **Rust 后端 SFTP 二进制原子写入与自动重连**：在 `src-tauri/src/sftp/service.rs` 实现 `write_binary_file`，通过 `BASE64_STANDARD.decode` 解码并将原始图片字节无损写入远端服务器文件；在 `lib.rs` 暴露 `sftp_write_binary_file` Tauri 命令并在 `sftp/tests.rs` 中补充 Base64 与 PNG 魔数测试；2) **前端多源剪贴板解析引擎**：在 `clipboard.ts` 封装 `readClipboardImage`、`blobToBase64` 与 `getImageExtension`，支持系统截图 Blob、复制的本地文件、Base64 Data URL 与文件 URL；3) **VS Code 级智能命名与冲突处理**：截图默认生成 `image.png`，若已存在自动递增为 `image-1.png`、`image-2.png`，避免打断连续截屏工作流；具名文件重名无缝唤起冲突处理弹窗；4) **右键菜单与全局快捷键感知**：在 `ContextMenu.tsx` 中添加带 `ClipboardPaste` 图标与 `Ctrl+V` 徽标的“粘贴 (Paste)”菜单项；在 `ProjectExplorer.tsx` 监听全局 `Ctrl+V` / `Cmd+V` 与 `paste` 事件，避让输入框、CodeMirror 与终端，精准解析当前选中目标目录并在成功后自动展开目录、刷新树并弹出 Toast。
+- **TASK-064** 圆满完成：修复新仓库执行 Git Commit 无响应问题与作者身份自适应配置 (Fix Git Commit Unresponsive in New Repos & Auto-Configure Author Identity)。彻底根除无默认 Git 作者身份时 Commit 失败被静默忽略的前端“假死”体验：1) 自适应根据目录与 `gh` 活跃账号配置提交者信息；2) 引入全链路退出码拦截；3) 兼容首次提交无 HEAD 分支时的 Diff 生成。
 - **TASK-063** 圆满完成：适配私有部署模型生成 Commit Message 并保留 OpenRouter 兼容支持 (Adapt Self-Hosted Model for AI Commit Generation while Preserving OpenRouter Compatibility)。核心落地四项能力：1) **双轨模型分流与智能适配引擎**：在 `aiCommitService.ts` 中根据 Base URL 自动识别 OpenRouter 与私有部署模型，OpenRouter 保持原请求头与 `reasoning: { max_tokens: 0 }` 压制；私有模型（如 `qwen3.5:2b-optimized`）采用通用 OpenAI 标准请求头与 `reasoning_effort: "none"`，彻底杜绝思考过程消耗 token 导致的空白输出问题；2) **双向流式与非流式兼容解析**：支持 `text/event-stream` SSE 流与标准 JSON 解析，具备自动回退解析 `reasoning` 与正则清洗（剥除 `<think>` 标签、Markdown 代码块、引号与 `git commit -m` 前缀）；3) **环境配置与构建注入**：在 `.env` 中默认配置自建模型并完整保留 `OPEN_ROUTER_API_KEY`，在 `vite.config.ts` 中优化环境变量级联优先级与智能回退；4) **可视化设置弹窗升级**：在 `AiConfigModal.tsx` 中增加自建模型快捷预设与一键切换，TypeScript 0 报错，生产打包与 34 个 Rust 测试全量通过。
 - **TASK-062** 圆满完成：彻底根除文件浏览侧边栏在粘贴命令行与窗口聚焦等场景下的频闪与整树重绘缺陷 (Completely Eliminate File Explorer Flickering on Terminal Paste & Window Focus)。深度剖析并根治四大诱发原因：1) **文件树持久挂载与非破坏性原地更新**：在 `ProjectExplorer.tsx` 中将中央全屏旋转 Spinner 的展现条件严格限制为 `!tree[rootPath] && loadingPaths.includes(rootPath)`（仅在首次冷启动内存无数据时展示），只要 `tree[rootPath]` 已经加载，后续刷新绝对不卸载树节点，彻底根除切回窗口时整棵树突然消失并替换为加载大白块的剧烈白闪与跳动；2) **窗口切回聚焦节流与静默同步**：在 `App.tsx` 的 `handleResume` 中，为文件树远端同步添加 30 秒节流时间戳保护并透传 `silent: true`，彻底消除用户从外部复制并在几秒内切回终端粘贴时频繁触发的全树 SFTP 遍历；3) **Zustand 状态深度比对与零重绘拦截**：在 `fileTreeStore.ts` 引入高性能 `areEntriesEqual` 比对算法，当目录获取条目与内存数据完全一致时保留原引用并直接 `return state`，阻断事件分发，实现 0 组件重绘与 0 次 DOM 抖动；4) **节点组件精细化订阅与展开防晃**：在 `FileTreeNode.tsx` 改用精细化 Selector 并包裹 `React.memo`，仅在 `isLoading && !hasChildrenLoaded` 时显示 Loader2，已有缓存的展开目录在后台同步期间稳定保持 `<ChevronDown>`，彻底根除箭头跳跃；并在 `connectionStore.ts` 引入状态浅比对避免重复渲染。
 - **TASK-061** 圆满完成：修复文件树路径复制失效保留旧内容与终端联动高频重绘闪烁缺陷 (Fix File Explorer Path Copy Failure & Terminal Title Auto-Refresh Flicker)。深度剖析并根治两大核心痛点：1) **文件树路径复制失效与保留旧内容根治**：封装高可靠跨平台剪贴板工具库 `src/utils/clipboard.ts`，自动确立窗口焦点，采用现代异步 `navigator.clipboard.writeText` 结合经典同步 `document.execCommand('copy')`（创建只读隐藏 textarea）双轨容灾降级机制，彻底消除 Linux WebKitGTK 环境下因 DOM 卸载与焦点缺失抛出的 `NotAllowedError`；在 ContextMenu 中使用 `await onCopyPath()` 确保写入完成后再销毁菜单；挂载全局轻量毛玻璃 Toast 浮层，复制成功实时反馈路径；2) **终端联动高频重绘与文件树闪烁彻底治理**：在 `XtermView.tsx` 的 `term.onTitleChange` 中引入 `lastTitle` 缓存去重与有效 prompt 路径解析，彻底过滤 TMUX 状态栏秒针、日志输出与交互式 CLI 带来的无效刷新；在 `fileTreeStore.ts` 为 `loadDirectory` 与 `refreshPath` 引入 `silent` 静默模式，终端感知刷新时不变更 `loadingPaths`，彻底根除文件树展开箭头在折叠图标与 `Loader2` 旋转动画之间高频跳动闪烁，实现 0 频闪后台无感平滑同步。

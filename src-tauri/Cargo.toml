@@ -1,6 +1,6 @@
 [package]
 name = "remora"
-version = "0.1.22"
+version = "0.1.24"
 description = "Lightweight SSH Remote Workspace Desktop Client"
 authors = ["Remora Team"]
 edition = "2021"
@@ -33,3 +33,5 @@ russh-sftp = "2.4"
 async-trait = "0.1"
 ssh-key = { version = "0.6", features = ["ed25519", "rsa", "encryption"] }
 base64 = "0.22"
+arboard = "3"
+png = "0.17"

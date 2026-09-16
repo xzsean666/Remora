@@ -439,8 +439,12 @@ export async function safeInvoke<T = any>(cmd: string, args?: Record<string, any
     case "sftp_remove":
     case "sftp_trash":
     case "sftp_create_file":
-    case "sftp_create_dir": {
+    case "sftp_create_dir":
+    case "sftp_write_binary_file": {
       return undefined as unknown as T;
+    }
+    case "read_clipboard_image_native": {
+      return null as unknown as T;
     }
     case "transfer_upload": {
       return `mock-upload-${Date.now()}` as unknown as T;

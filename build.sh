@@ -81,7 +81,7 @@ Remora 跨平台 Release 构建脚本
   --apk, --android   构建 Android APK 安装包，归档到 release/android/ 目录
   --target <arch>    指定 Android 构建目标 (例如 aarch64-linux-android, 默认主流 64 位 ARM)
   --debug            构建 Debug 版本的 APK (默认构建带有内置自动签名的 Release 版 APK)
-  --deb              构建并打包 Debian / Ubuntu (.deb) 安装包到 release/desktop/ (仅支持 Linux)
+  --deb              仅构建并打包 Debian / Ubuntu (.deb) 安装包到 release/desktop/ (仅支持 Linux，纯净无多余二进制)
   --windows          构建 Windows 桌面安装包 (nsis/msi，仅支持 Windows 环境或通过 Actions 打包)
   --mac, --darwin    构建 macOS 桌面安装包 (dmg，仅支持 macOS 环境或通过 Actions 打包)
   --no-bundle        仅编译独立 Release 可执行二进制，跳过所有打包步骤 (默认)
@@ -93,7 +93,7 @@ Remora 跨平台 Release 构建脚本
 示例:
   ./build.sh --apk                 # 编译 Android APK，输出到 release/android/
   ./build.sh --apk --debug         # 编译带调试信息的 Debug 版 APK 到 release/android/
-  ./build.sh --deb                 # 编译桌面二进制并打包 .deb 安装包到 release/desktop/
+  ./build.sh --deb                 # 仅打包 .deb 安装包到 release/desktop/ (纯净无多余文件)
   ./build.sh --windows             # 构建 Windows 桌面安装包 (在 Windows 环境下)
   ./build.sh --mac                 # 构建 macOS DMG 安装包 (在 macOS 环境下)
   ./build.sh                       # 默认编译桌面 release 二进制，输出到 release/desktop/
@@ -378,7 +378,6 @@ else
   PLATFORM="desktop"
   TARGET_NAME="${OS}_${ARCH}"
   RELEASE_DIR="${SCRIPT_DIR}/release/desktop"
-  ARCH_RELEASE_DIR="${SCRIPT_DIR}/release/desktop/${TARGET_NAME}"
 fi
 
 echo -e "${BOLD}${CYAN}======================================================${NC}"
@@ -404,7 +403,7 @@ echo ""
 
 if [ "$DO_CLEAN" -eq 1 ]; then
   log_info "正在清理历史构建与发布目录..."
-  rm -rf dist "${RELEASE_DIR}"
+  rm -rf dist "${RELEASE_DIR}" "${SCRIPT_DIR}/src-tauri/target/release/bundle"
   if [ "$BUILD_MODE" = "apk" ]; then
     rm -rf "${SCRIPT_DIR}/release/remora-"*.apk "${SCRIPT_DIR}/src-tauri/gen/android/app/build/outputs/apk"
   fi
@@ -454,6 +453,8 @@ if [ "$BUILD_MODE" = "apk" ]; then
   log_info "正在整理 Android APK 构建产物..."
   APK_SRC_DIR="${SCRIPT_DIR}/src-tauri/gen/android/app/build/outputs/apk"
   mkdir -p "${RELEASE_DIR}"
+  # 清理 release/android/ 下历史旧版本 APK，避免无限堆积
+  rm -f "${RELEASE_DIR}"/*.apk "${RELEASE_DIR}/SHA256SUMS.txt" 2>/dev/null || true
 
   FOUND_COUNT=0
   while IFS= read -r apk; do
@@ -464,12 +465,9 @@ if [ "$BUILD_MODE" = "apk" ]; then
     clean_stem="${stem#app-}"
     # 格式规范: remora-universal-release-v0.1.0.apk
     versioned_name="remora-${clean_stem}-v${APP_VERSION}.apk"
-    legacy_name="remora-${raw_name}"
 
-    # 归档到 release/android/ 专属目录 (生成带版本号的文件)
+    # 归档到 release/android/ 专属目录 (仅保留单一标准版本命名，杜绝重复多份拷贝)
     cp -f "$apk" "${RELEASE_DIR}/${versioned_name}"
-    # 同时保留兼容文件名
-    cp -f "$apk" "${RELEASE_DIR}/${legacy_name}"
     log_success "已归档: release/android/${versioned_name}"
   done < <(find "${APK_SRC_DIR}" -type f -name "*.apk" 2>/dev/null || true)
 
@@ -514,7 +512,10 @@ case "$BUILD_MODE" in
   deb)
     if [ "$OS" != "linux" ]; then
       log_warn "当前操作系统为 ${OS}，--deb 仅在 Linux 上生效，降级为普通 release 构建"
+      TAURI_ARGS+=("--no-bundle")
     else
+      # 构建前清理历史 deb bundle 目录，确保仅产生当前版本 deb
+      rm -rf "${SCRIPT_DIR}/src-tauri/target/release/bundle/deb"
       TAURI_ARGS+=("--bundles" "deb")
     fi
     ;;
@@ -528,6 +529,7 @@ case "$BUILD_MODE" in
       log_info "  3. Windows Git Bash: 在 Windows Git Bash 中执行: ./build.sh --windows"
       exit 1
     else
+      rm -rf "${SCRIPT_DIR}/src-tauri/target/release/bundle/nsis" "${SCRIPT_DIR}/src-tauri/target/release/bundle/msi"
       TAURI_ARGS+=("--bundles" "nsis,msi")
     fi
     ;;
@@ -540,17 +542,16 @@ case "$BUILD_MODE" in
       log_info "  2. macOS 本地打包: 在 Mac 电脑终端中执行: ./build.sh --mac"
       exit 1
     else
+      rm -rf "${SCRIPT_DIR}/src-tauri/target/release/bundle/dmg"
       TAURI_ARGS+=("--bundles" "dmg")
     fi
-    ;;
-  no-bundle)
-    TAURI_ARGS+=("--no-bundle")
     ;;
   all-bundles)
     # 不传 --no-bundle，让 tauri 按照配置打包全部支持的 targets
     ;;
-  default)
-    # 默认执行快速 release 构建
+  no-bundle|default|*)
+    # 默认快速 release 构建，仅编译独立二进制，跳过打包
+    TAURI_ARGS+=("--no-bundle")
     ;;
 esac
 
@@ -579,9 +580,9 @@ pnpm tauri build "${TAURI_ARGS[@]}"
 
 log_info "正在整理桌面端构建产物到 ${RELEASE_DIR}..."
 mkdir -p "${RELEASE_DIR}"
-if [ -n "${ARCH_RELEASE_DIR:-}" ]; then
-  mkdir -p "${ARCH_RELEASE_DIR}"
-fi
+
+# 彻底清理可能残留的嵌套重复目录 (如 release/desktop/linux_x64)
+rm -rf "${RELEASE_DIR}/${TARGET_NAME}" 2>/dev/null || true
 
 BIN_NAME="remora"
 if [ "$OS" = "windows" ]; then
@@ -589,65 +590,104 @@ if [ "$OS" = "windows" ]; then
 fi
 
 TARGET_BIN="${SCRIPT_DIR}/src-tauri/target/release/${BIN_NAME}"
-
-if [ ! -f "$TARGET_BIN" ]; then
-  log_error "未找到编译生成的二进制文件: ${TARGET_BIN}"
-  exit 1
-fi
-
-# 复制主执行文件到 release/desktop/
-cp -f "${TARGET_BIN}" "${RELEASE_DIR}/${BIN_NAME}"
-chmod +x "${RELEASE_DIR}/${BIN_NAME}"
-if [ -n "${ARCH_RELEASE_DIR:-}" ]; then
-  cp -f "${TARGET_BIN}" "${ARCH_RELEASE_DIR}/${BIN_NAME}"
-  chmod +x "${ARCH_RELEASE_DIR}/${BIN_NAME}"
-fi
-log_success "已归档主程序: ${RELEASE_DIR}/${BIN_NAME}"
-
-# 归档带版本号的独立二进制文件
-VERSIONED_BIN="remora-${TARGET_NAME}-v${APP_VERSION}"
-if [ "$OS" = "windows" ]; then
-  VERSIONED_BIN="remora-${TARGET_NAME}-v${APP_VERSION}.exe"
-fi
-cp -f "${TARGET_BIN}" "${RELEASE_DIR}/${VERSIONED_BIN}"
-chmod +x "${RELEASE_DIR}/${VERSIONED_BIN}"
-log_success "已归档带版本号主程序: ${RELEASE_DIR}/${VERSIONED_BIN}"
-
-# 收集 bundles (若存在)
 BUNDLE_DIR="${SCRIPT_DIR}/src-tauri/target/release/bundle"
-if [ -d "$BUNDLE_DIR" ]; then
-  # 收集 deb 包与签名
-  if [ -d "${BUNDLE_DIR}/deb" ]; then
-    find "${BUNDLE_DIR}/deb" -maxdepth 1 \( -name "*.deb" -o -name "*.sig" \) -exec cp -f {} "${RELEASE_DIR}/" \;
-    if [ -n "${ARCH_RELEASE_DIR:-}" ]; then
-      find "${BUNDLE_DIR}/deb" -maxdepth 1 \( -name "*.deb" -o -name "*.sig" \) -exec cp -f {} "${ARCH_RELEASE_DIR}/" \;
-    fi
-  fi
-  # 收集 appimage (若存在)
-  if [ -d "${BUNDLE_DIR}/appimage" ]; then
-    find "${BUNDLE_DIR}/appimage" -maxdepth 1 -name "*.AppImage" -exec cp -f {} "${RELEASE_DIR}/" \;
-    if [ -n "${ARCH_RELEASE_DIR:-}" ]; then
-      find "${BUNDLE_DIR}/appimage" -maxdepth 1 -name "*.AppImage" -exec cp -f {} "${ARCH_RELEASE_DIR}/" \;
-    fi
-  fi
-  # 收集 rpm (若存在)
-  if [ -d "${BUNDLE_DIR}/rpm" ]; then
-    find "${BUNDLE_DIR}/rpm" -maxdepth 1 -name "*.rpm" -exec cp -f {} "${RELEASE_DIR}/" \;
-  fi
-  # 收集 dmg (macOS)
-  if [ -d "${BUNDLE_DIR}/dmg" ]; then
-    find "${BUNDLE_DIR}/dmg" -maxdepth 1 -name "*.dmg" -exec cp -f {} "${RELEASE_DIR}/" \;
-  fi
-  # 收集 nsis/msi (Windows)
-  if [ -d "${BUNDLE_DIR}/nsis" ]; then
-    find "${BUNDLE_DIR}/nsis" -maxdepth 1 -name "*.exe" -exec cp -f {} "${RELEASE_DIR}/" \;
-  fi
-  if [ -d "${BUNDLE_DIR}/msi" ]; then
-    find "${BUNDLE_DIR}/msi" -maxdepth 1 -name "*.msi" -exec cp -f {} "${RELEASE_DIR}/" \;
-  fi
-fi
 
-# 生成 SHA-256 校验和文件 (仅对普通文件生成，忽略子目录)
+case "$BUILD_MODE" in
+  deb)
+    # --------------------------------------------------------------------------
+    # 用户明确指定 --deb：仅归档当前版本的 deb 安装包 (及签名)，严禁复制未打包二进制
+    # --------------------------------------------------------------------------
+    # 清理 release/desktop 下的历史包与二进制残留，确保输出纯净
+    rm -f "${RELEASE_DIR}"/*.deb "${RELEASE_DIR}"/*.sig "${RELEASE_DIR}"/remora* "${RELEASE_DIR}"/*.AppImage 2>/dev/null || true
+
+    DEB_FOUND=0
+    if [ -d "${BUNDLE_DIR}/deb" ]; then
+      # 优先精确匹配当前构建版本号的 deb 与 sig
+      while IFS= read -r deb_file; do
+        [ -z "$deb_file" ] && continue
+        DEB_FOUND=1
+        cp -f "$deb_file" "${RELEASE_DIR}/"
+        log_success "已归档 DEB 安装包: ${RELEASE_DIR}/$(basename "$deb_file")"
+      done < <(find "${BUNDLE_DIR}/deb" -maxdepth 1 \( -name "*${APP_VERSION}*.deb" -o -name "*${APP_VERSION}*.sig" \) 2>/dev/null || true)
+
+      # 兜底：如果未匹配到版本号，则归档最新的 deb
+      if [ "$DEB_FOUND" -eq 0 ]; then
+        while IFS= read -r deb_file; do
+          [ -z "$deb_file" ] && continue
+          DEB_FOUND=1
+          cp -f "$deb_file" "${RELEASE_DIR}/"
+          log_success "已归档 DEB 安装包: ${RELEASE_DIR}/$(basename "$deb_file")"
+        done < <(find "${BUNDLE_DIR}/deb" -maxdepth 1 \( -name "*.deb" -o -name "*.sig" \) 2>/dev/null || true)
+      fi
+    fi
+
+    if [ "$DEB_FOUND" -eq 0 ]; then
+      log_error "未在 ${BUNDLE_DIR}/deb 中找到生成的 deb 文件！"
+      exit 1
+    fi
+    ;;
+
+  windows)
+    # 仅归档 Windows 安装包 (nsis/msi/sig)
+    rm -f "${RELEASE_DIR}"/*.exe "${RELEASE_DIR}"/*.msi "${RELEASE_DIR}"/*.sig 2>/dev/null || true
+    if [ -d "${BUNDLE_DIR}/nsis" ]; then
+      find "${BUNDLE_DIR}/nsis" -maxdepth 1 \( -name "*.exe" -o -name "*.sig" \) -exec cp -f {} "${RELEASE_DIR}/" \;
+    fi
+    if [ -d "${BUNDLE_DIR}/msi" ]; then
+      find "${BUNDLE_DIR}/msi" -maxdepth 1 \( -name "*.msi" -o -name "*.sig" \) -exec cp -f {} "${RELEASE_DIR}/" \;
+    fi
+    ;;
+
+  mac|darwin)
+    # 仅归档 macOS DMG 安装包
+    rm -f "${RELEASE_DIR}"/*.dmg "${RELEASE_DIR}"/*.sig 2>/dev/null || true
+    if [ -d "${BUNDLE_DIR}/dmg" ]; then
+      find "${BUNDLE_DIR}/dmg" -maxdepth 1 \( -name "*.dmg" -o -name "*.sig" \) -exec cp -f {} "${RELEASE_DIR}/" \;
+    fi
+    ;;
+
+  all-bundles)
+    # 打包所有 bundle 并保留主程序
+    if [ -f "$TARGET_BIN" ]; then
+      cp -f "${TARGET_BIN}" "${RELEASE_DIR}/${BIN_NAME}"
+      chmod +x "${RELEASE_DIR}/${BIN_NAME}"
+      VERSIONED_BIN="remora-${TARGET_NAME}-v${APP_VERSION}"
+      [ "$OS" = "windows" ] && VERSIONED_BIN="${VERSIONED_BIN}.exe"
+      (cd "${RELEASE_DIR}" && ln -sf "${BIN_NAME}" "${VERSIONED_BIN}")
+    fi
+    if [ -d "${BUNDLE_DIR}/deb" ]; then
+      find "${BUNDLE_DIR}/deb" -maxdepth 1 \( -name "*${APP_VERSION}*.deb" -o -name "*${APP_VERSION}*.sig" \) -exec cp -f {} "${RELEASE_DIR}/" \;
+    fi
+    if [ -d "${BUNDLE_DIR}/appimage" ]; then
+      find "${BUNDLE_DIR}/appimage" -maxdepth 1 \( -name "*${APP_VERSION}*.AppImage" -o -name "*${APP_VERSION}*.sig" \) -exec cp -f {} "${RELEASE_DIR}/" \;
+    fi
+    if [ -d "${BUNDLE_DIR}/rpm" ]; then
+      find "${BUNDLE_DIR}/rpm" -maxdepth 1 \( -name "*${APP_VERSION}*.rpm" -o -name "*${APP_VERSION}*.sig" \) -exec cp -f {} "${RELEASE_DIR}/" \;
+    fi
+    ;;
+
+  no-bundle|default|*)
+    # 仅归档独立 Release 二进制可执行文件
+    if [ ! -f "$TARGET_BIN" ]; then
+      log_error "未找到编译生成的二进制文件: ${TARGET_BIN}"
+      exit 1
+    fi
+    # 清理 release/desktop 下历史旧二进制与旧包
+    rm -f "${RELEASE_DIR}"/remora* "${RELEASE_DIR}"/*.deb "${RELEASE_DIR}"/*.AppImage 2>/dev/null || true
+
+    cp -f "${TARGET_BIN}" "${RELEASE_DIR}/${BIN_NAME}"
+    chmod +x "${RELEASE_DIR}/${BIN_NAME}"
+    log_success "已归档主程序: ${RELEASE_DIR}/${BIN_NAME}"
+
+    VERSIONED_BIN="remora-${TARGET_NAME}-v${APP_VERSION}"
+    [ "$OS" = "windows" ] && VERSIONED_BIN="${VERSIONED_BIN}.exe"
+    # 使用软链接指向主程序，避免占用两倍 30MB 磁盘空间
+    (cd "${RELEASE_DIR}" && ln -sf "${BIN_NAME}" "${VERSIONED_BIN}")
+    log_success "已创建带版本号链接: ${RELEASE_DIR}/${VERSIONED_BIN} -> ${BIN_NAME}"
+    ;;
+esac
+
+# 生成 SHA-256 校验和文件 (仅对 release 顶层普通文件生成，忽略子目录)
 (
   cd "${RELEASE_DIR}"
   rm -f SHA256SUMS.txt
@@ -657,19 +697,8 @@ fi
     find . -maxdepth 1 -type f ! -name "SHA256SUMS.txt" -printf "%P\n" | sort | xargs -r shasum -a 256 > SHA256SUMS.txt 2>/dev/null || true
   fi
 )
-if [ -n "${ARCH_RELEASE_DIR:-}" ] && [ -d "${ARCH_RELEASE_DIR}" ]; then
-  (
-    cd "${ARCH_RELEASE_DIR}"
-    rm -f SHA256SUMS.txt
-    if command -v sha256sum &>/dev/null; then
-      find . -maxdepth 1 -type f ! -name "SHA256SUMS.txt" -printf "%P\n" | sort | xargs -r sha256sum > SHA256SUMS.txt 2>/dev/null || true
-    elif command -v shasum &>/dev/null; then
-      find . -maxdepth 1 -type f ! -name "SHA256SUMS.txt" -printf "%P\n" | sort | xargs -r shasum -a 256 > SHA256SUMS.txt 2>/dev/null || true
-    fi
-  )
-fi
 
-# 保持对旧路径 release/${TARGET_NAME} 的软链接兼容
+# 保持对旧路径 release/${TARGET_NAME} 的软链接兼容 (例如: release/linux_x64 -> desktop)
 if [ ! -d "${SCRIPT_DIR}/release/${TARGET_NAME}" ] || [ -L "${SCRIPT_DIR}/release/${TARGET_NAME}" ]; then
   rm -f "${SCRIPT_DIR}/release/${TARGET_NAME}"
   ln -sf "desktop" "${SCRIPT_DIR}/release/${TARGET_NAME}"
@@ -683,7 +712,7 @@ echo ""
 echo -e "${BOLD}${GREEN}======================================================${NC}"
 echo -e "${BOLD}${GREEN}            Build Succeeded!                          ${NC}"
 echo -e "${BOLD}${GREEN}======================================================${NC}"
-log_success "所有桌面端产物已成功生成并存放到: ${BOLD}${RELEASE_DIR}${NC}"
+log_success "桌面端构建产物已成功生成并存放到: ${BOLD}${RELEASE_DIR}${NC}"
 echo ""
 echo -e "${BOLD}产物清单 (${RELEASE_DIR}):${NC}"
 
@@ -692,6 +721,15 @@ if command -v ls &>/dev/null; then
 fi
 
 echo ""
-echo -e "${BOLD}直接运行方式:${NC}"
-echo -e "  ${CYAN}./release/desktop/${BIN_NAME}${NC}"
+if [ "$BUILD_MODE" = "deb" ]; then
+  LATEST_DEB="$(find "${RELEASE_DIR}" -maxdepth 1 -name "*.deb" 2>/dev/null | head -n 1 || true)"
+  if [ -n "$LATEST_DEB" ]; then
+    echo -e "${BOLD}DEB 安装方式:${NC}"
+    echo -e "  ${CYAN}sudo dpkg -i ${LATEST_DEB}${NC}"
+    echo -e "  或: ${CYAN}sudo apt install ./${LATEST_DEB#${SCRIPT_DIR}/}${NC}"
+  fi
+elif [ -f "${RELEASE_DIR}/${BIN_NAME}" ]; then
+  echo -e "${BOLD}直接运行方式:${NC}"
+  echo -e "  ${CYAN}./release/desktop/${BIN_NAME}${NC}"
+fi
 echo ""
