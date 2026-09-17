@@ -5,50 +5,61 @@
 ---
 
 ## 1. 当前目标与任务
-- **当前 Goal**: 优化 build.sh release 构建归档逻辑 (按需精准产物归档、去重与清理)
+- **当前 Goal**: IDE 默认 Markdown 富文本阅读渲染与源码/分屏编辑模式支持
 - **当前 Task**: 
-  - TASK-066: 优化 build.sh release 构建归档逻辑 (按需精准产物归档、去重与清理) [DONE]
-- **当前状态**: DONE (全部验收标准满足，彻底根除物理双重复制与历史版本堆积缺陷；在 `--deb` 模式下仅生成并归档当前版本的 `.deb` 文件与 `SHA256SUMS.txt`；废除 `ARCH_RELEASE_DIR` 双重物理目录；`--no-bundle` 模式通过软链接创建版本别名杜绝 30MB 重复二进制；`release/` 总目录体积从 904MB 骤降至 41MB，脚本实测构建 100% 成功)
+  - TASK-067: IDE 默认 Markdown 富文本阅读渲染与源码/分屏编辑模式支持 (Default Markdown Reader View & Source/Split Edit Modes) [DONE]
+- **当前状态**: DONE (全部验收标准满足：Markdown 文件默认以富文本阅读模式打开，配备 VS Code 暗色现代排版、标题锚点、GitHub Alerts 提示卡片、highlight.js 语法高亮代码块、一键复制代码、GFM 表格与浮动大纲目录 TOC；支持顶栏快速切换编辑模式与桌面端双向分屏实时预览；支持 Ctrl+E / Cmd+E 快捷键无缝切换与 Ctrl+S 远程安全保存；TypeScript 零报错、前端构建与 36 项 Rust 测试全量通过)
 
 ---
 
 ## 2. 本次会话完成内容
 
-1. **构建模式与产物归档按需解耦 (`build.sh`)**:
-   - 彻底修复无论构建何种目标都无条件向 `release/desktop/` 拷贝两份 30MB 独立二进制（`remora` 与 `remora-linux_x64-v*`）的缺陷；
-   - 在 `--deb` 模式下，构建前自动清理 `target/release/bundle/deb`，构建完成后**仅**归档当前版本的 `Remora_${APP_VERSION}_*.deb`、对应签名（若有）及 `SHA256SUMS.txt`，绝不拷贝未打包的独立二进制；
-   - 在 `--no-bundle` 独立二进制模式下，仅归档 `remora` 主执行文件，并通过软链接 `ln -sf remora remora-${TARGET_NAME}-v${APP_VERSION}` 创建版本别名，零空间开销杜绝双倍物理存储。
+1. **默认阅读模式与文件类型智能扩展 (`editorStore.ts` & `tauriBridge.ts`)**:
+   - 在 `src/utils/tauriBridge.ts` 实现 `isMarkdownFilePath` 工具函数，全面覆盖 `.md`、`.markdown`、`.mdown`、`.mkd` 等扩展名；
+   - 在 `src/stores/editorStore.ts` 扩展 `fileType: "text" | "image" | "markdown"` 与 `viewMode: "preview" | "source" | "split"`；
+   - 在 `openFile` 中将 Markdown 文件默认打开状态设置为阅读模式（`viewMode: "preview"`），若带有搜索跳转定位 `targetPosition` 则自动切换至源码编辑模式；
+   - 增加 `setMarkdownViewMode` 与 `toggleMarkdownViewMode` 状态流转方法。
 
-2. **彻底废除 `ARCH_RELEASE_DIR` 双重目录嵌套 (`build.sh`)**:
-   - 移除 `ARCH_RELEASE_DIR="${SCRIPT_DIR}/release/desktop/${TARGET_NAME}"` 以及所有向该子目录写入的 `cp -f` 与校验和逻辑；
-   - 清理磁盘上已存在的 `release/desktop/linux_x64` 冗余目录（避免单次构建多出 255MB+ 重复文件）；
-   - 保留顶层软链接 `release/linux_x64 -> desktop`，确保与任何依赖旧路径脚本或习惯的 100% 向下兼容。
+2. **高品质 Markdown 富文本阅读器 (`MarkdownViewer.tsx`)**:
+   - 引入轻量级依赖 `marked` (v18) 与 `highlight.js` (v11)，无 React 19 对等依赖冲突；
+   - 定制渲染器深度融合 VS Code 深色暗色主题，排版精致清晰；
+   - **GitHub Alerts 提示块**：自动解析 `> [!NOTE]`, `> [!TIP]`, `> [!IMPORTANT]`, `> [!WARNING]`, `> [!CAUTION]` 并渲染为带专用色彩边框、背景及精致 SVG 图标的提示卡片；
+   - **代码块语法高亮与一键复制**：顶栏展示语言 Badge（如 `TYPESCRIPT`、`RUST`、`BASH` 等），配备浮层一键复制按钮与 "Copied!" 交互反馈；
+   - **GFM 表格与任务清单**：表格自适应包裹于横向滚动容器中，支持表头强调与斑马纹；任务清单 `- [ ]` 渲染为精致复选框；
+   - **浮动大纲目录 (TOC)**：使用 `marked.lexer` 解析 H1-H3 标题，提供可折叠大纲抽屉，点击平滑滚动直达对应标题锚点；
+   - **文档指标微状态栏**：计算中英文字数、行数及预估阅读时间；
+   - **外部链接安全拦截**：自动调用 `@tauri-apps/plugin-opener` 或系统默认浏览器打开外部网页。
 
-3. **历史版本全量遍历拷贝治理与构建前清理 (`build.sh`)**:
-   - 修复原脚本 `find "${BUNDLE_DIR}/deb"` 无版本过滤导致 0.1.11 ~ 0.1.23 全量历史 deb 包被无休止重复复制到 `release/desktop/` 的严重缺陷；
-   - 引入版本号精确匹配：`*${APP_VERSION}*.deb`；
-   - 构建前自动清理 `bundle/` 对应格式目录与 `release/desktop/` 内的异构与旧包；
-   - 优化 Android APK 归档，仅保留规范版本命名的单一 APK，取消重复的无版本号 legacy APK 物理拷贝。
+3. **三模合一编辑与分屏体系 (`EditorArea.tsx`)**:
+   - 当激活 Tab 为 Markdown 时，顶栏提供美观胶囊切换器：`📖 阅读`、`✏️ 编辑`、`◫ 分屏`（移动端自适应隐藏分屏）；
+   - 支持全局快捷键 `Ctrl+E` / `Cmd+E` 与 `Ctrl+Shift+V` 随时快速切换阅读与编辑；
+   - 分屏模式下左侧为 CodeMirror 源码编辑，右侧为实时渲染预览；
+   - 在 `MarkdownViewer` 引入 60ms 防抖更新机制，确保在分屏高速输入时 CodeMirror 保持 60fps 丝滑输入体验；
+   - 保存机制（`Ctrl+S` 与顶部保存按钮）在编辑模式与分屏模式下无缝工作，更新远程 SFTP。
 
 ---
 
 ## 3. 修改与创建的文件
 - **新建文件**:
-  - `docs/AI/tasks/TASK-066.md`
+  - `src/components/Editor/MarkdownViewer.tsx`
+  - `docs/AI/tasks/TASK-067.md`
 - **修改文件**:
-  - `build.sh`
+  - `package.json`
+  - `pnpm-lock.yaml`
+  - `src/utils/tauriBridge.ts`
+  - `src/stores/editorStore.ts`
+  - `src/components/Editor/EditorArea.tsx`
   - `docs/AI/TASK_INDEX.md`
   - `docs/AI/SESSION_STATE.md`
 
 ---
 
 ## 4. 已运行的验证命令及结果
-- **脚本语法与结构校验**:
-  - `bash -n build.sh`: 语法检查 0 错误。
-- **DEB 打包模式端到端实测 (`./build.sh --deb --no-bump`)**:
-  - 成功完成生产打包与归档，`release/desktop/` 仅包含 `Remora_0.1.23_amd64.deb` (12MB) 与 `SHA256SUMS.txt`；
-  - 验证绝无独立二进制 `remora`、绝无旧版本 deb、绝无 `linux_x64` 嵌套目录。
-- **独立二进制模式实测 (`./build.sh --no-bundle --no-bump`)**:
-  - 成功编译并归档 `remora` (30MB)，`remora-linux_x64-v0.1.23` 自动创建为软链接，0 重复存储。
-- **磁盘占用大幅缩减**:
-  - `release/` 目录整体磁盘占用由 **904MB** 骤降至 **41MB**（仅包含 12MB DEB 与 29MB Android APK）。
+- **TypeScript 静态类型检查**:
+  - `pnpm exec tsc --noEmit`: 0 错误通过。
+- **前端打包构建**:
+  - `pnpm build`: 成功编译打包（`✓ built in 9.04s`）。
+- **Rust 后端与集成测试**:
+  - `cargo test`: 36 个单元测试与 1 个 E2E 全流程测试全量 100% 通过（0 failed）。
+- **Markdown 语法与解析验证**:
+  - 执行 `test_markdown.js` 验证 GFM 表格、代码高亮、标题大纲提取与 Checkbox 清单渲染，均 100% 正确。

@@ -3,6 +3,7 @@ import {
   safeInvoke as invoke,
   formatErrorMessage,
   isImageFilePath,
+  isMarkdownFilePath,
   type ReadBinaryFileResponse,
 } from "../utils/tauriBridge";
 import { clearEditorCache } from "../utils/editorCache";
@@ -18,12 +19,12 @@ export interface EditorTab {
   isPreview: boolean;
   cursor?: { line: number; ch: number };
   targetPosition?: { line: number; ch?: number };
-  fileType?: "text" | "image";
+  fileType?: "text" | "image" | "markdown";
   imageDataUrl?: string;
   mimeType?: string;
   fileSize?: number;
   svgSource?: string;
-  viewMode?: "preview" | "source";
+  viewMode?: "preview" | "source" | "split";
 }
 
 export interface ConflictInfo {
@@ -58,6 +59,8 @@ interface EditorState {
   pinTab: (path: string) => void;
   updateContent: (path: string, content: string) => void;
   toggleSvgViewMode: (path: string) => void;
+  setMarkdownViewMode: (path: string, mode: "preview" | "source" | "split") => void;
+  toggleMarkdownViewMode: (path: string) => void;
   saveActiveFile: () => Promise<boolean>;
   saveFile: (path: string, forceOverwrite?: boolean) => Promise<boolean>;
   resolveConflict: (action: "overwrite" | "reload" | "cancel") => Promise<void>;
@@ -83,6 +86,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       }
       if (targetPosition) {
         existingTab.targetPosition = targetPosition;
+        if (existingTab.fileType === "markdown") {
+          existingTab.viewMode = "source";
+        }
       }
       updatedTabs[existingIndex] = existingTab;
       set({ tabs: updatedTabs, activeTabPath: path });
@@ -92,6 +98,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ loading: true });
     try {
       const isImg = isImageFilePath(path);
+      const isMd = isMarkdownFilePath(path);
       const fileName = path.split("/").filter(Boolean).pop() || path;
       let newTab: EditorTab;
 
@@ -128,6 +135,25 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           fileSize: res.size,
           svgSource,
           viewMode: "preview",
+        };
+      } else if (isMd) {
+        const res = await invoke<ReadFileResponse>("sftp_read_file", {
+          serverId,
+          path,
+        });
+
+        newTab = {
+          serverId,
+          path,
+          name: fileName,
+          content: res.content,
+          savedContent: res.content,
+          mtime: res.mtime,
+          isDirty: false,
+          isPreview,
+          targetPosition,
+          fileType: "markdown",
+          viewMode: targetPosition ? "source" : "preview",
         };
       } else {
         const res = await invoke<ReadFileResponse>("sftp_read_file", {
@@ -182,6 +208,27 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (idx === -1) return;
     const tab = tabs[idx];
     const newMode = tab.viewMode === "source" ? "preview" : "source";
+    const updatedTabs = [...tabs];
+    updatedTabs[idx] = { ...tab, viewMode: newMode };
+    set({ tabs: updatedTabs });
+  },
+
+  setMarkdownViewMode: (path: string, mode: "preview" | "source" | "split") => {
+    const { tabs } = get();
+    const idx = tabs.findIndex((t) => t.path === path);
+    if (idx === -1) return;
+    const tab = tabs[idx];
+    const updatedTabs = [...tabs];
+    updatedTabs[idx] = { ...tab, viewMode: mode };
+    set({ tabs: updatedTabs });
+  },
+
+  toggleMarkdownViewMode: (path: string) => {
+    const { tabs } = get();
+    const idx = tabs.findIndex((t) => t.path === path);
+    if (idx === -1) return;
+    const tab = tabs[idx];
+    const newMode = tab.viewMode === "preview" ? "source" : "preview";
     const updatedTabs = [...tabs];
     updatedTabs[idx] = { ...tab, viewMode: newMode };
     set({ tabs: updatedTabs });

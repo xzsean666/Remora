@@ -647,6 +647,22 @@ export function isImageFilePath(path: string): boolean {
   return ext ? IMAGE_EXTENSIONS.has(ext) : false;
 }
 
+const MARKDOWN_EXTENSIONS = new Set([
+  "md",
+  "markdown",
+  "mdown",
+  "mkd",
+  "mkdn",
+  "mdwn",
+  "mdx",
+]);
+
+export function isMarkdownFilePath(path: string): boolean {
+  if (!path) return false;
+  const ext = path.split(".").pop()?.toLowerCase();
+  return ext ? MARKDOWN_EXTENSIONS.has(ext) : false;
+}
+
 export interface ReadBinaryFileResponse {
   data_base64: string;
   mime_type: string;

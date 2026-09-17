@@ -75,21 +75,23 @@
 | **TASK-064** | 修复新仓库执行 Git Commit 无响应问题与作者身份自适应配置 (Fix Git Commit Unresponsive in New Repos & Auto-Configure Author Identity) | TASK-060 | **DONE** | `docs/AI/tasks/TASK-064.md` |
 | **TASK-065** | 远程目录粘贴剪贴板图片与本地文件支持 (Remote Folder Clipboard Image & File Paste Support) | TASK-004, TASK-007, TASK-010, TASK-054 | **DONE** | `docs/AI/tasks/TASK-065.md` |
 | **TASK-066** | 优化 build.sh release 构建归档逻辑 (按需精准产物归档、去重与清理) | TASK-050 | **DONE** | `docs/AI/tasks/TASK-066.md` |
+| **TASK-067** | IDE 默认 Markdown 富文本阅读渲染与源码/分屏编辑模式支持 (Default Markdown Reader View & Source/Split Edit Modes) | TASK-008, TASK-054 | **DONE** | `docs/AI/tasks/TASK-067.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 67
+- **已完成 (DONE)**: 68
 - **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 67
+- **总任务数**: 68
 
 ---
 
 ## 3. 项目执行总结
 
+- **TASK-067** 圆满完成：IDE 默认 Markdown 富文本阅读渲染与源码/分屏编辑模式支持 (Default Markdown Reader View & Source/Split Edit Modes)。彻底满足用户对 Markdown 默认阅读与高质量编辑的全部诉求：1) **默认阅读模式**：打开任何 `.md`、`.markdown` 等文件默认以高品质富文本阅读视图打开（非纯等宽代码）；若携带跳转定位 `targetPosition` 则自动切换至源码编辑模式；2) **高端富文本渲染引擎 (`MarkdownViewer.tsx`)**：深度融合 VS Code 深色暗色主题，集成 `marked` (v18) 与 `highlight.js` (v11)；完整支持层级标题锚点跳转、GitHub 风格 Alert 提示卡片（`[!NOTE]`, `[!TIP]`, `[!WARNING]`, `[!IMPORTANT]`, `[!CAUTION]`）、带语言 Badge 徽标与一键复制代码块、GFM 表格水平自适应横滚、任务复选框及安全外部链接跳转；3) **浮动大纲目录 (TOC) 与文档指标**：解析 H1-H3 标题提供可折叠大纲抽屉，点击平滑滚动直达；底部微状态栏实时统计中英文字数、行数与预估阅读时间；4) **三模合一与分屏实时联动 (`EditorArea.tsx`)**：顶栏提供 `📖 阅读`、`✏️ 编辑`、`◫ 分屏` 模式切换胶囊，支持全局快捷键 `Ctrl+E` / `Cmd+E` 与 `Ctrl+Shift+V` 随时切换；分屏模式下左侧编辑右侧实时渲染（带 60ms 防抖保证 60fps 丝滑输入）；`Ctrl+S` 无缝保存回写远程 SFTP。
 - **TASK-066** 圆满完成：优化 build.sh release 构建归档逻辑 (按需精准产物归档、去重与清理)。彻底治理 release 目录下冗余文件膨胀与重复拷贝问题：1) **按需模式解耦**：当用户指定 `--deb` 构建时，构建前自动清理 `bundle/deb` 历史残留，构建后**仅**归档当前版本的 `Remora_${APP_VERSION}_*.deb` 及签名和校验和，严禁拷贝未打包的 raw binary (`remora` / `remora-linux_x64-v*`)，不再拷贝历史 AppImage 或旧版本 deb；2) **彻底废除 `ARCH_RELEASE_DIR`**：移除 `release/desktop/linux_x64` 双重物理拷贝目录，顶层维持 `release/linux_x64 -> desktop` 软链接；3) **独立二进制去重**：`--no-bundle` 模式下版本名通过软链接创建，不再物理生成两份 30MB 二进制；4) **Android APK 去重**：仅归档规范版本命名的单一 APK；5) 磁盘占用从 904MB 骤降至 41MB，deb 构建输出 100% 纯净规范。
 - **TASK-065** 圆满完成：远程目录粘贴剪贴板图片与本地文件支持 (Remote Folder Clipboard Image & File Paste Support)。核心落地四大功能：1) **Rust 后端 SFTP 二进制原子写入与自动重连**：在 `src-tauri/src/sftp/service.rs` 实现 `write_binary_file`，通过 `BASE64_STANDARD.decode` 解码并将原始图片字节无损写入远端服务器文件；在 `lib.rs` 暴露 `sftp_write_binary_file` Tauri 命令并在 `sftp/tests.rs` 中补充 Base64 与 PNG 魔数测试；2) **前端多源剪贴板解析引擎**：在 `clipboard.ts` 封装 `readClipboardImage`、`blobToBase64` 与 `getImageExtension`，支持系统截图 Blob、复制的本地文件、Base64 Data URL 与文件 URL；3) **VS Code 级智能命名与冲突处理**：截图默认生成 `image.png`，若已存在自动递增为 `image-1.png`、`image-2.png`，避免打断连续截屏工作流；具名文件重名无缝唤起冲突处理弹窗；4) **右键菜单与全局快捷键感知**：在 `ContextMenu.tsx` 中添加带 `ClipboardPaste` 图标与 `Ctrl+V` 徽标的“粘贴 (Paste)”菜单项；在 `ProjectExplorer.tsx` 监听全局 `Ctrl+V` / `Cmd+V` 与 `paste` 事件，避让输入框、CodeMirror 与终端，精准解析当前选中目标目录并在成功后自动展开目录、刷新树并弹出 Toast。
 - **TASK-064** 圆满完成：修复新仓库执行 Git Commit 无响应问题与作者身份自适应配置 (Fix Git Commit Unresponsive in New Repos & Auto-Configure Author Identity)。彻底根除无默认 Git 作者身份时 Commit 失败被静默忽略的前端“假死”体验：1) 自适应根据目录与 `gh` 活跃账号配置提交者信息；2) 引入全链路退出码拦截；3) 兼容首次提交无 HEAD 分支时的 Diff 生成。
