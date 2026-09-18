@@ -10,6 +10,7 @@ import {
   type ReadBinaryFileResponse,
 } from "../utils/tauriBridge";
 import { clearEditorCache } from "../utils/editorCache";
+import { useLayoutStore } from "./layoutStore";
 
 export interface EditorTab {
   serverId: string;
@@ -79,6 +80,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   conflictInfo: null,
 
   openFile: async (serverId: string, path: string, isPreview = false, targetPosition?: { line: number; ch?: number }) => {
+    // Automatically ensure the editor display area is open when opening any file
+    useLayoutStore.getState().setEditorOpen(true);
+
     const { tabs } = get();
     const existingIndex = tabs.findIndex((t) => t.path === path);
 

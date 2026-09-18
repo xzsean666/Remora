@@ -79,20 +79,26 @@
 | **TASK-068** | IDE 常规文档与数据格式深度支持 (PDF 预览、CSV/TSV 表格网格与源码双模、Parquet 列式数据与 Schema 预览) | TASK-008, TASK-067 | **DONE** | `docs/AI/tasks/TASK-068.md` |
 | **TASK-069** | Parquet 首屏极速采样切片加载与全文件按需深度检索支持 (Parquet Windowed Sample Loading & Full-File Deep Search) | TASK-068 | **DONE** | `docs/AI/tasks/TASK-069.md` |
 | **TASK-070** | 远端文件浏览文件夹打包下载与 .gitignore 规则过滤支持 (Remote Folder Archive Download with .gitignore Rule Exclusion) | TASK-004, TASK-007, TASK-010, TASK-047, TASK-057 | **DONE** | `docs/AI/tasks/TASK-070.md` |
+| **TASK-071** | 桌面端文件展示页面开关控制与 Markdown 渲染黑屏崩溃修复 (Desktop File Editor Toggle Control & Markdown Viewer Black Screen Crash Fix) | TASK-006, TASK-008, TASK-067 | **DONE** | `docs/AI/tasks/TASK-071.md` |
+| **TASK-072** | 集成 Mermaid 实现 Markdown 阅读器图表动态渲染 (Integrate Mermaid for Markdown Viewer Diagram Rendering) | TASK-067, TASK-071 | **DONE** | `docs/AI/tasks/TASK-072.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 71
+- **已完成 (DONE)**: 73
 - **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 71
+- **总任务数**: 73
 
 ---
 
 ## 3. 项目执行总结
+
+- **TASK-072** 圆满完成：集成 Mermaid 实现 Markdown 阅读器图表动态渲染与卡死根治 (Integrate Mermaid for Markdown Viewer Diagram Rendering & Fix Hang)。彻底满足用户在 Markdown 阅读器中可视化呈现流程图、架构图、时序图等图表的诉求，并彻底根除异步渲染脱节卡死缺陷：1) **Mermaid 官方引擎集成与暗色主题深度适配**：安装 `mermaid@^12.0.0`，在 `MarkdownViewer.tsx` 中单例初始化暗色调色板（背景 `#0d1117`、边框 `#388bfd`、文字 `#f0f6fc`、线条 `#8b949e`），与 VS Code 暗色调完美融合；2) **Marked 代码块拦截与交互容器构建**：自定义 `code` 渲染器拦截 `lang === "mermaid"`，输出包含 `MERMAID DIAGRAM` 徽标、`【查看源码/隐藏源码】` 切换按钮与一键 `Copy` 按钮的工具条；3) **全新架构：缓存驱动直出 (Cache-First Pre-render) 与脱节 DOM 根治**：彻底废除旧版有缺陷的 `querySelectorAll` 查找并修改 DOM 的异步模式，采用全局内存 LRU 缓存 + `mermaidVersion` 响应式版本控制，Marked 直接将已生成的暗色 SVG 注入 HTML 字符串，实现 0ms 秒开直出、0 DOM 查询、React 单次原子提交；4) **AST 异步批量渲染与 4 秒超时熔断保护**：基于词法解析批量提取未缓存 Mermaid 块，使用 `Promise.race` 配合 4 秒超时熔断机制，并在完成后清理 `document.body` 临时节点；语法有误或超时时优雅降级为暗色错误卡片并自动展开源码视图排查，绝不引发页面卡死或白屏；5) **真实 Linux WebKitGTK 2.41 宿主全真模拟测试**：在真实 WebKit 渲染引擎中验证合法图表毫秒级转译出暗色 SVG、错误图表精准捕获与优雅降级；6) 前端 TypeScript 0 报错，`pnpm run build` 生产打包成功，41 项 Rust 单元测试与 1 项 E2E 测试全量 100% 通过。
+
+- **TASK-071** 圆满完成：桌面端文件展示页面开关控制与 Markdown 渲染黑屏崩溃修复 (Desktop File Editor Toggle Control & Markdown Viewer Black Screen Crash Fix)。彻底满足用户对桌面端主工作区文件展示页面灵活开关与 Markdown 文档稳定渲染的诉求：1) **Markdown 表格渲染根治与全链路防黑屏**：修复 `MarkdownViewer.tsx` 中使用已废弃的 `Marked.prototype.defaults.renderer` 导致的 `TypeError` 致命崩溃，正确绑定 `Renderer.prototype.table.call(this, token)`；在文档解析外层添加全局 `try...catch` 兜底保护，降级保证安全；2) **React 19 崩溃防护错误边界 (`ErrorBoundary.tsx`)**：创建通用的文档视图错误边界包裹各种 Viewer，遇到任何未捕获异常呈现友好的暗色恢复卡片（支持重载、切换源码、关闭标签），杜绝 React 卸载引发的整屏黑屏；3) **桌面端文件展示开关自由控制 (`isEditorOpen`)**：在左侧 ActivityBar 底部紧邻终端开关新增 `FileCode` 切换按钮（并支持 `Ctrl+Alt+E` 快捷键），同时在 `EditorTabBar` 提供右侧快捷收起按钮；4) **自适应纯终端沉浸工作流**：当文件展示收起时，终端面板自适应占据 100% 视口高度 (`flex-1`)，Splitter 自动隐藏；两者均收起时展示引导卡片；从文件树、搜索面板或 Git 变更打开任何文件时自动拉起文件展示；5) TypeScript 0 报错，前端打包与 Rust 测试 100% 通过。
 
 - **TASK-070** 圆满完成：远端文件浏览文件夹打包下载与 .gitignore 规则过滤支持 (Remote Folder Archive Download with .gitignore Rule Exclusion)。彻底满足用户在文件浏览器中一键打包下载任意文件夹及完整工作区、且自动忽略 `.gitignore` 中排除文件的刚性需求：1) **全链路自适应远端打包引擎 (`TransferManager.start_download_folder`)**：在 Rust 后端扩展 `TransferManager` 支持 `ConnectionManager` 远端命令执行管线；通过 Base64 传递目录路径安全防注入；打包脚本优先采用 Git 引擎（`git ls-files -z --cached --others --exclude-standard`）精确识别 `.gitignore` 规则，天然过滤 `.git/` 本身与各类被忽略临时产物（如 `node_modules`、`target`、日志），并使用 `--transform` 保留顶级文件夹名；脱离 Git 时自动检测 GNU tar `--exclude-vcs-ignores` 与常见排除兜底；2) **防冲突本地自动递增与流式下载**：默认保存至 `~/Downloads/Remora/<folder>.tar.gz`，若存在同名文件自动按 `<folder>-1.tar.gz` 递增避让，杜绝覆盖历史文件；基于 SFTP 异步流式下载，每 100ms 刷新速率与进度，并在完成后或取消时自动向远端发送 `rm -f` 彻底清理 `/tmp` 临时归档，零磁盘残留；3) **VS Code 级上下文菜单无缝集成**：`ContextMenu.tsx` 中为目录展示带 `Archive` 图标的 `Download Folder (打包下载)` 选项，`FileTreeNode.tsx` 与根工作区均支持一键触发并弹出 Toast；4) 前端 TypeScript 0 报错，前端构建成功，41 项 Rust 单元测试与 1 项 E2E 测试全量 100% 通过。
 

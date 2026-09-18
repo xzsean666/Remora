@@ -110,12 +110,14 @@ mod tests {
             sidebar_visible: Some(true),
             terminal_visible: Some(true),
             active_sidebar_tab: Some("explorer".to_string()),
+            editor_visible: Some(true),
         };
 
         storage.set_layout_preferences(&prefs).unwrap();
         let loaded = storage.get_layout_preferences().unwrap();
         assert_eq!(loaded.sidebar_width, Some(300));
         assert_eq!(loaded.terminal_height, Some(250));
+        assert_eq!(loaded.editor_visible, Some(true));
     }
 
     #[test]

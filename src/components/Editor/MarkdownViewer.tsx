@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef } from "react";
-import { Marked } from "marked";
+import { Marked, Renderer } from "marked";
 import hljs from "highlight.js";
 import "highlight.js/styles/github-dark.css";
 import {
@@ -11,6 +11,100 @@ import {
 } from "lucide-react";
 import { EditorTab, useEditorStore } from "../../stores/editorStore";
 import { copyTextToClipboard } from "../../utils/clipboard";
+import mermaid from "mermaid";
+
+let mermaidInitialized = false;
+function initMermaid() {
+  if (mermaidInitialized) return;
+  try {
+    mermaid.initialize({
+      startOnLoad: false,
+      suppressErrorRendering: true,
+      securityLevel: "loose",
+      theme: "dark",
+      themeVariables: {
+        darkMode: true,
+        background: "#0d1117",
+        mainBkg: "#161b22",
+        primaryColor: "#1f6feb",
+        primaryTextColor: "#f0f6fc",
+        primaryBorderColor: "#388bfd",
+        lineColor: "#8b949e",
+        secondaryColor: "#238636",
+        tertiaryColor: "#161b22",
+        nodeBorder: "#388bfd",
+        clusterBkg: "#161b22",
+        clusterBorder: "#30363d",
+        defaultLinkColor: "#8b949e",
+        titleColor: "#f0f6fc",
+        edgeLabelBackground: "#161b22",
+        actorBkg: "#161b22",
+        actorBorder: "#388bfd",
+        actorTextColor: "#f0f6fc",
+        actorLineColor: "#8b949e",
+        signalColor: "#8b949e",
+        signalTextColor: "#f0f6fc",
+        labelBoxBkgColor: "#161b22",
+        labelBoxBorderColor: "#30363d",
+        labelTextColor: "#f0f6fc",
+        loopTextColor: "#f0f6fc",
+        noteBorderColor: "#d29922",
+        noteBkgColor: "#272115",
+        noteTextColor: "#f0f6fc",
+        activationBorderColor: "#388bfd",
+        activationBkgColor: "#1f6feb",
+        sequenceNumberColor: "#ffffff",
+      },
+      fontFamily:
+        '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif',
+    });
+    mermaidInitialized = true;
+  } catch (err) {
+    console.error("[MarkdownViewer] Failed to initialize Mermaid:", err);
+  }
+}
+
+// Global cache for rendered Mermaid SVGs & parse errors: code -> { svg?: string; error?: string }
+const mermaidRenderCache = new Map<string, { svg?: string; error?: string }>();
+const mermaidPendingRenders = new Set<string>();
+
+function setMermaidCache(key: string, value: { svg?: string; error?: string }) {
+  if (mermaidRenderCache.size >= 500) {
+    const oldestKey = mermaidRenderCache.keys().next().value;
+    if (oldestKey) mermaidRenderCache.delete(oldestKey);
+  }
+  mermaidRenderCache.set(key, value);
+}
+
+// Extract all unique mermaid code blocks from markdown AST
+function extractMermaidBlocks(content: string): string[] {
+  if (!content || !content.toLowerCase().includes("mermaid")) return [];
+  try {
+    const lexer = new Marked();
+    const tokens = lexer.lexer(content);
+    const blocks: string[] = [];
+    const walk = (toks: any[]) => {
+      for (const t of toks) {
+        if (t.type === "code" && (t.lang || "").trim().toLowerCase() === "mermaid") {
+          const code = (t.text || "").trim();
+          if (code && !blocks.includes(code)) {
+            blocks.push(code);
+          }
+        }
+        if (t.tokens) walk(t.tokens);
+        if (t.items) {
+          for (const it of t.items) {
+            if (it.tokens) walk(it.tokens);
+          }
+        }
+      }
+    };
+    walk(tokens);
+    return blocks;
+  } catch {
+    return [];
+  }
+}
 
 interface MarkdownViewerProps {
   tab: EditorTab;
@@ -94,6 +188,7 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({ tab }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [showToc, setShowToc] = useState(false);
   const [activeHeadingId, setActiveHeadingId] = useState<string>("");
+  const [mermaidVersion, setMermaidVersion] = useState(0);
   const { setMarkdownViewMode, saveActiveFile } = useEditorStore();
 
   // Support Ctrl+S / Cmd+S save in MarkdownViewer
@@ -123,13 +218,13 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({ tab }) => {
   const headings = useMemo<HeadingItem[]>(() => {
     try {
       const markedInstance = new Marked();
-      const tokens = markedInstance.lexer(debouncedContent);
+      const tokens = markedInstance.lexer(debouncedContent || "");
       const items: HeadingItem[] = [];
       for (const t of tokens) {
         if (t.type === "heading" && t.depth <= 3) {
-          const rawText = t.text.trim();
+          const rawText = (t.text || "").trim();
           items.push({
-            id: slugify(t.raw.replace(/^[#\s]+/, "").trim()),
+            id: slugify((t.raw || "").replace(/^[#\s]+/, "").trim()),
             text: rawText,
             depth: t.depth,
           });
@@ -158,107 +253,180 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({ tab }) => {
 
   // Render HTML using customized Marked parser
   const htmlContent = useMemo(() => {
-    const marked = new Marked({
-      gfm: true,
-      breaks: true,
-    });
+    try {
+      const marked = new Marked({
+        gfm: true,
+        breaks: true,
+      });
 
-    marked.use({
-      renderer: {
-        // Syntax-highlighted code blocks with language badge and copy button
-        code({ text, lang }: { text: string; lang?: string }) {
-          const rawLang = (lang || "").trim();
-          let highlighted = "";
-          if (rawLang && hljs.getLanguage(rawLang)) {
-            try {
-              highlighted = hljs.highlight(text, { language: rawLang }).value;
-            } catch {
-              highlighted = hljs.highlightAuto(text).value;
+      marked.use({
+        renderer: {
+          // Syntax-highlighted code blocks with language badge and copy button
+          code({ text, lang }: { text: string; lang?: string }) {
+            const rawText = text ?? "";
+            const rawLang = (lang || "").trim();
+            let highlighted = "";
+            if (rawLang && hljs.getLanguage(rawLang)) {
+              try {
+                highlighted = hljs.highlight(rawText, { language: rawLang }).value;
+              } catch {
+                highlighted = hljs.highlightAuto(rawText).value;
+              }
+            } else {
+              try {
+                highlighted = hljs.highlightAuto(rawText).value;
+              } catch {
+                highlighted = escapeHtml(rawText);
+              }
             }
-          } else {
-            try {
-              highlighted = hljs.highlightAuto(text).value;
-            } catch {
-              highlighted = escapeHtml(text);
+
+            const langLabel = rawLang ? rawLang.toUpperCase() : "CODE";
+            const encoded = encodeURIComponent(rawText);
+
+            if (rawLang.toLowerCase() === "mermaid") {
+              const blockId = "mmd-" + Math.random().toString(36).slice(2, 9);
+              const trimmedCode = rawText.trim();
+              const cached = mermaidRenderCache.get(trimmedCode);
+
+              let chartInnerHtml = "";
+              let isSourceExpanded = false;
+
+              if (cached?.svg) {
+                chartInnerHtml = cached.svg;
+              } else if (cached?.error) {
+                isSourceExpanded = true;
+                chartInnerHtml = `
+                  <div class="w-full p-3 bg-rose-950/30 border border-rose-800/40 rounded text-xs text-rose-300 select-text">
+                    <div class="flex items-center gap-1.5 font-semibold text-rose-400 mb-1">
+                      <svg class="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                      <span>Mermaid 图表解析错误</span>
+                    </div>
+                    <pre class="font-mono text-[11px] whitespace-pre-wrap text-rose-300/80 mb-2 overflow-x-auto">${escapeHtml(cached.error)}</pre>
+                    <div class="text-[11px] text-vscode-textMuted">已自动展开下方源码供参考与修正</div>
+                  </div>
+                `;
+              } else {
+                chartInnerHtml = `
+                  <div class="flex items-center gap-2 text-vscode-textMuted text-xs font-mono py-4">
+                    <svg class="w-4 h-4 animate-spin text-vscode-activityBarActive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10"/></svg>
+                    <span>渲染图表中...</span>
+                  </div>
+                `;
+              }
+
+              return `<div class="mermaid-block-wrapper my-4 rounded-lg overflow-hidden border border-vscode-border/80 bg-[#161b22] shadow-sm" data-block-id="${blockId}">
+                <div class="mermaid-block-header flex items-center justify-between px-3.5 py-1.5 bg-[#1c2128] border-b border-vscode-border/50 text-xs select-none">
+                  <div class="flex items-center gap-1.5 font-mono text-[11px] text-vscode-textMuted">
+                    <span class="w-2 h-2 rounded-full ${cached?.error ? "bg-rose-400 shadow-rose-400/50" : "bg-emerald-400 shadow-emerald-400/50"} inline-block shadow-xs"></span>
+                    <span class="font-medium text-vscode-textBright/90">MERMAID</span>
+                    <span class="text-[10px] text-vscode-textMuted/70 ml-0.5">DIAGRAM</span>
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <button class="toggle-mermaid-btn flex items-center gap-1 px-2 py-0.5 rounded text-[11px] text-vscode-textMuted hover:text-vscode-textBright hover:bg-white/10 transition-colors cursor-pointer select-none ${isSourceExpanded ? "bg-white/10 text-vscode-textBright" : ""}" data-block="${blockId}" title="展开或收起源码">
+                      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+                      <span class="toggle-text">${isSourceExpanded ? "隐藏源码" : "查看源码"}</span>
+                    </button>
+                    <button class="copy-code-btn flex items-center gap-1 px-2 py-0.5 rounded text-[11px] text-vscode-textMuted hover:text-vscode-textBright hover:bg-white/10 transition-colors cursor-pointer select-none" data-code="${encoded}" title="复制 Mermaid 源码">
+                      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                      <span>Copy</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="mermaid-chart-area p-4 overflow-x-auto flex justify-center items-center bg-[#0d1117] min-h-[80px]" data-code="${encoded}">
+                  ${chartInnerHtml}
+                </div>
+                <div class="mermaid-source-area ${isSourceExpanded ? "" : "hidden"} border-t border-vscode-border/50">
+                  <pre class="p-4 overflow-x-auto text-[13px] font-mono leading-relaxed bg-[#161b22] m-0"><code class="hljs language-mermaid">${highlighted}</code></pre>
+                </div>
+              </div>`;
             }
-          }
 
-          const langLabel = rawLang ? rawLang.toUpperCase() : "CODE";
-          const encoded = encodeURIComponent(text);
-
-          return `<div class="code-block-wrapper my-4 rounded-lg overflow-hidden border border-vscode-border/80 bg-[#161b22] shadow-sm">
-            <div class="code-block-header flex items-center justify-between px-3.5 py-1.5 bg-[#1c2128] border-b border-vscode-border/50 text-xs select-none">
-              <div class="flex items-center gap-1.5 font-mono text-[11px] text-vscode-textMuted">
-                <span class="w-2 h-2 rounded-full bg-vscode-activityBarActive/80 inline-block"></span>
-                <span class="font-medium text-vscode-textBright/90">${langLabel}</span>
+            return `<div class="code-block-wrapper my-4 rounded-lg overflow-hidden border border-vscode-border/80 bg-[#161b22] shadow-sm">
+              <div class="code-block-header flex items-center justify-between px-3.5 py-1.5 bg-[#1c2128] border-b border-vscode-border/50 text-xs select-none">
+                <div class="flex items-center gap-1.5 font-mono text-[11px] text-vscode-textMuted">
+                  <span class="w-2 h-2 rounded-full bg-vscode-activityBarActive/80 inline-block"></span>
+                  <span class="font-medium text-vscode-textBright/90">${escapeHtml(langLabel)}</span>
+                </div>
+                <button class="copy-code-btn flex items-center gap-1 px-2 py-0.5 rounded text-[11px] text-vscode-textMuted hover:text-vscode-textBright hover:bg-white/10 transition-colors cursor-pointer select-none" data-code="${encoded}">
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  <span>Copy</span>
+                </button>
               </div>
-              <button class="copy-code-btn flex items-center gap-1 px-2 py-0.5 rounded text-[11px] text-vscode-textMuted hover:text-vscode-textBright hover:bg-white/10 transition-colors cursor-pointer select-none" data-code="${encoded}">
-                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                <span>Copy</span>
-              </button>
-            </div>
-            <pre class="p-4 overflow-x-auto text-[13px] font-mono leading-relaxed bg-[#161b22] m-0"><code class="hljs ${rawLang ? `language-${rawLang}` : ""}">${highlighted}</code></pre>
-          </div>`;
-        },
-
-        // GitHub-style Alerts callout renderer (> [!NOTE], > [!TIP], etc.)
-        blockquote(token: any) {
-          const match = token.text.match(/^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:\s*\n)?([\s\S]*)$/i);
-          if (match) {
-            const type = match[1].toUpperCase();
-            const cfg = alertConfig[type] || alertConfig.NOTE;
-
-            // Remove the [!TYPE] marker from the first token's text
-            if (token.tokens && token.tokens[0] && token.tokens[0].tokens && token.tokens[0].tokens[0]) {
-              token.tokens[0].tokens[0].text = token.tokens[0].tokens[0].text.replace(
-                /^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*/i,
-                ""
-              );
-            }
-            const bodyHtml = this.parser.parse(token.tokens);
-
-            return `<div class="markdown-alert markdown-alert-${type.toLowerCase()} border-l-4 ${cfg.border} ${cfg.bg} my-4 p-3.5 rounded-r shadow-xs">
-              <div class="flex items-center gap-2 font-semibold text-xs mb-1.5 uppercase tracking-wider ${cfg.text}">
-                ${cfg.iconSvg}
-                <span>${cfg.title}</span>
-              </div>
-              <div class="text-[13.5px] leading-relaxed text-[#c9d1d9] pl-6">${bodyHtml}</div>
+              <pre class="p-4 overflow-x-auto text-[13px] font-mono leading-relaxed bg-[#161b22] m-0"><code class="hljs ${rawLang ? `language-${escapeHtml(rawLang)}` : ""}">${highlighted}</code></pre>
             </div>`;
-          }
+          },
 
-          return `<blockquote>${this.parser.parse(token.tokens)}</blockquote>`;
+          // GitHub-style Alerts callout renderer (> [!NOTE], > [!TIP], etc.)
+          blockquote(token: any) {
+            const rawText = token.text || "";
+            const match = rawText.match(/^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:\s*\n)?([\s\S]*)$/i);
+            if (match) {
+              const type = match[1].toUpperCase();
+              const cfg = alertConfig[type] || alertConfig.NOTE;
+
+              // Remove the [!TYPE] marker from the first token's text
+              if (token.tokens && token.tokens[0] && token.tokens[0].tokens && token.tokens[0].tokens[0]) {
+                token.tokens[0].tokens[0].text = (token.tokens[0].tokens[0].text || "").replace(
+                  /^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*/i,
+                  ""
+                );
+              }
+              const bodyHtml = this.parser.parse(token.tokens || []);
+
+              return `<div class="markdown-alert markdown-alert-${type.toLowerCase()} border-l-4 ${cfg.border} ${cfg.bg} my-4 p-3.5 rounded-r shadow-xs">
+                <div class="flex items-center gap-2 font-semibold text-xs mb-1.5 uppercase tracking-wider ${cfg.text}">
+                  ${cfg.iconSvg}
+                  <span>${cfg.title}</span>
+                </div>
+                <div class="text-[13.5px] leading-relaxed text-[#c9d1d9] pl-6">${bodyHtml}</div>
+              </div>`;
+            }
+
+            return `<blockquote>${this.parser.parse(token.tokens || [])}</blockquote>`;
+          },
+
+          // Slugified anchor headings
+          heading(token: any) {
+            const depth = token.depth || 1;
+            const id = slugify((token.raw || "").replace(/^[#\s]+/, "").trim());
+            const inlineHtml = this.parser.parseInline(token.tokens || []);
+            return `<h${depth} id="${id}" class="heading-anchor group flex items-center gap-2">
+              <span>${inlineHtml}</span>
+              <a href="#${id}" class="opacity-0 group-hover:opacity-100 text-vscode-textMuted hover:text-vscode-activityBarActive transition-opacity text-sm font-normal select-none" title="Direct link to this section">#</a>
+            </h${depth}>`;
+          },
+
+          // External vs Anchor Links
+          link(token: any) {
+            const href = token.href || "#";
+            const title = token.title ? ` title="${escapeHtml(token.title)}"` : "";
+            const text = this.parser.parseInline(token.tokens || []);
+            const isExternal = href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//");
+            return `<a href="${escapeHtml(href)}"${title}${isExternal ? ' class="external-link" target="_blank" rel="noopener noreferrer"' : ""}>${text}</a>`;
+          },
+
+          // Table with responsive horizontal scroll wrapper
+          table(token: any) {
+            let defaultTable = "";
+            try {
+              defaultTable = Renderer.prototype.table.call(this, token);
+            } catch {
+              defaultTable = "";
+            }
+            return `<div class="table-wrapper my-4 overflow-x-auto rounded-lg border border-vscode-border/70 shadow-xs">${defaultTable}</div>`;
+          },
         },
+      });
 
-        // Slugified anchor headings
-        heading(token: any) {
-          const depth = token.depth;
-          const id = slugify(token.raw.replace(/^[#\s]+/, "").trim());
-          const inlineHtml = this.parser.parseInline(token.tokens);
-          return `<h${depth} id="${id}" class="heading-anchor group flex items-center gap-2">
-            <span>${inlineHtml}</span>
-            <a href="#${id}" class="opacity-0 group-hover:opacity-100 text-vscode-textMuted hover:text-vscode-activityBarActive transition-opacity text-sm font-normal select-none" title="Direct link to this section">#</a>
-          </h${depth}>`;
-        },
-
-        // External vs Anchor Links
-        link(token: any) {
-          const href = token.href || "#";
-          const title = token.title ? ` title="${escapeHtml(token.title)}"` : "";
-          const text = this.parser.parseInline(token.tokens);
-          const isExternal = href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//");
-          return `<a href="${href}"${title}${isExternal ? ' class="external-link" target="_blank" rel="noopener noreferrer"' : ""}>${text}</a>`;
-        },
-
-        // Table with responsive horizontal scroll wrapper
-        table(token: any) {
-          const defaultTable = (Marked.prototype.defaults.renderer?.table as any)?.call(this, token) || "";
-          return `<div class="table-wrapper my-4 overflow-x-auto rounded-lg border border-vscode-border/70 shadow-xs">${defaultTable}</div>`;
-        },
-      },
-    });
-
-    return marked.parse(debouncedContent);
-  }, [debouncedContent]);
+      return marked.parse(debouncedContent || "");
+    } catch (err) {
+      console.error("[MarkdownViewer] Parse error:", err);
+      return `<div class="p-4 text-rose-300 bg-rose-950/30 border border-rose-800/40 rounded-lg my-4">
+        <p class="font-semibold mb-1 text-xs">Markdown 渲染异常 (Render fallback to raw content):</p>
+        <pre class="whitespace-pre-wrap font-mono text-xs text-vscode-text select-text">${escapeHtml(debouncedContent || "")}</pre>
+      </div>`;
+    }
+  }, [debouncedContent, mermaidVersion]);
 
   // Restore scroll position on mount
   useEffect(() => {
@@ -275,7 +443,82 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({ tab }) => {
     };
   }, [tab.path]);
 
-  // Handle click delegation (Copy Code, Anchor scroll, External links)
+  // Render Mermaid diagrams asynchronously via cache-first architecture with 4s circuit breaker
+  useEffect(() => {
+    const rawContent = debouncedContent || "";
+    const blocks = extractMermaidBlocks(rawContent);
+    if (blocks.length === 0) return;
+
+    // Filter out blocks that are already cached or currently pending
+    const uncachedBlocks = blocks.filter(
+      (code) => !mermaidRenderCache.has(code) && !mermaidPendingRenders.has(code)
+    );
+    if (uncachedBlocks.length === 0) return;
+
+    initMermaid();
+    let isMounted = true;
+
+    // Mark as pending
+    uncachedBlocks.forEach((code) => mermaidPendingRenders.add(code));
+
+    const renderBatch = async () => {
+      let anyRendered = false;
+
+      for (const code of uncachedBlocks) {
+        if (!isMounted) break;
+
+        const uniqueSuffix = Math.random().toString(36).slice(2, 9);
+        const renderId = `mermaid-render-${uniqueSuffix}`;
+
+        try {
+          let timer: any;
+          const timeoutPromise = new Promise<{ svg: string }>((_, reject) => {
+            timer = setTimeout(() => {
+              reject(new Error("Mermaid 渲染超时 (4s Timeout Circuit Breaker)"));
+            }, 4000);
+          });
+
+          const { svg } = await Promise.race([
+            mermaid.render(renderId, code),
+            timeoutPromise,
+          ]);
+          clearTimeout(timer);
+
+          setMermaidCache(code, { svg });
+          anyRendered = true;
+        } catch (err: any) {
+          const errMsg = err?.message || String(err);
+          console.warn("[MarkdownViewer] Mermaid rendering error:", errMsg);
+          setMermaidCache(code, { error: errMsg });
+          anyRendered = true;
+        } finally {
+          mermaidPendingRenders.delete(code);
+
+          // Clean up any leaked DOM elements created by Mermaid on document.body
+          try {
+            const leaked = document.getElementById("d" + renderId) || document.getElementById(renderId);
+            if (leaked) leaked.remove();
+            const orphanElements = document.querySelectorAll(`[id^="dmermaid-render-"]`);
+            orphanElements.forEach((el) => el.remove());
+          } catch {
+            // ignore DOM cleanup error
+          }
+        }
+      }
+
+      if (isMounted && anyRendered) {
+        setMermaidVersion((v) => v + 1);
+      }
+    };
+
+    renderBatch();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [debouncedContent]);
+
+  // Handle click delegation (Copy Code, Toggle Mermaid, Anchor scroll, External links)
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
 
@@ -292,6 +535,29 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({ tab }) => {
             copyBtn.innerHTML = originalHtml;
           }, 2000);
         });
+      }
+      return;
+    }
+
+    // 2. Toggle Mermaid Source / Chart View
+    const toggleMermaidBtn = target.closest(".toggle-mermaid-btn") as HTMLElement;
+    if (toggleMermaidBtn) {
+      const wrapper = toggleMermaidBtn.closest(".mermaid-block-wrapper");
+      if (wrapper) {
+        const sourceArea = wrapper.querySelector(".mermaid-source-area");
+        const toggleText = toggleMermaidBtn.querySelector(".toggle-text");
+        if (sourceArea) {
+          const isHidden = sourceArea.classList.contains("hidden");
+          if (isHidden) {
+            sourceArea.classList.remove("hidden");
+            if (toggleText) toggleText.textContent = "隐藏源码";
+            toggleMermaidBtn.classList.add("bg-white/10", "text-vscode-textBright");
+          } else {
+            sourceArea.classList.add("hidden");
+            if (toggleText) toggleText.textContent = "查看源码";
+            toggleMermaidBtn.classList.remove("bg-white/10", "text-vscode-textBright");
+          }
+        }
       }
       return;
     }
@@ -475,6 +741,18 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({ tab }) => {
           vertical-align: middle;
           accent-color: #1f6feb;
           cursor: pointer;
+        }
+        .mermaid-block-wrapper {
+          border-color: rgba(255, 255, 255, 0.12);
+        }
+        .mermaid-chart-area svg {
+          max-width: 100% !important;
+          height: auto !important;
+          display: block;
+          margin: 0 auto;
+        }
+        .mermaid-chart-area svg text {
+          font-family: inherit;
         }
       `}</style>
 

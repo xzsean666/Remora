@@ -69,6 +69,7 @@ pub struct LayoutPreferences {
     pub sidebar_visible: Option<bool>,
     pub terminal_visible: Option<bool>,
     pub active_sidebar_tab: Option<String>,
+    pub editor_visible: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

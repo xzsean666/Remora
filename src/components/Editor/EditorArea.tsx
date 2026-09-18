@@ -10,6 +10,7 @@ import { PdfViewer } from "./PdfViewer";
 import { CsvViewer } from "./CsvViewer";
 import { ParquetViewer } from "./ParquetViewer";
 import { ConflictModal } from "./ConflictModal";
+import { ErrorBoundary } from "../Common/ErrorBoundary";
 import {
   Code2,
   Loader2,
@@ -29,6 +30,7 @@ export const EditorArea: React.FC = () => {
     tabs,
     activeTabPath,
     loading,
+    closeTab,
     toggleSvgViewMode,
     setMarkdownViewMode,
     toggleMarkdownViewMode,
@@ -106,9 +108,21 @@ export const EditorArea: React.FC = () => {
       {/* Editor Content or Empty Welcome Screen */}
       <div className="flex-1 min-h-0 min-w-0 relative overflow-hidden bg-vscode-bg">
         {activeTab ? (
-          activeTab.fileType === "image" && activeTab.viewMode !== "source" ? (
-            <ImageViewer key={activeTab.path} tab={activeTab} />
-          ) : activeTab.fileType === "pdf" ? (
+          <ErrorBoundary
+            key={activeTab.path}
+            resetKeys={[activeTab.path, activeTab.viewMode]}
+            onSwitchToSource={() => {
+              if (activeTab.fileType === "markdown") {
+                setMarkdownViewMode(activeTab.path, "source");
+              } else if (activeTab.fileType === "csv") {
+                setCsvViewMode(activeTab.path, "source");
+              }
+            }}
+            onClose={() => closeTab(activeTab.path)}
+          >
+            {activeTab.fileType === "image" && activeTab.viewMode !== "source" ? (
+              <ImageViewer key={activeTab.path} tab={activeTab} />
+            ) : activeTab.fileType === "pdf" ? (
             <PdfViewer key={activeTab.path} tab={activeTab} />
           ) : activeTab.fileType === "parquet" ? (
             <ParquetViewer key={activeTab.path} tab={activeTab} />
@@ -283,7 +297,8 @@ export const EditorArea: React.FC = () => {
                 <CodeEditor key={activeTab.path} tab={activeTab} />
               </div>
             </div>
-          )
+          )}
+        </ErrorBoundary>
         ) : (
           <div className="h-full flex flex-col items-center justify-center p-6 text-center select-none overflow-y-auto min-h-0">
             <div className="max-w-md p-8 border border-vscode-border/50 rounded-2xl bg-vscode-sidebar/30 backdrop-blur-sm flex flex-col items-center my-auto flex-shrink-0">

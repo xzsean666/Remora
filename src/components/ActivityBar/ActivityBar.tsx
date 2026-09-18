@@ -1,5 +1,5 @@
 import React from "react";
-import { FolderTree, Search, Server, GitBranch, Zap, ArrowLeftRight, Settings, TerminalSquare, CopyPlus } from "lucide-react";
+import { FolderTree, Search, Server, GitBranch, Zap, ArrowLeftRight, Settings, TerminalSquare, CopyPlus, FileCode } from "lucide-react";
 import { useLayoutStore, SidebarTab } from "../../stores/layoutStore";
 import { useGitStore } from "../../stores/gitStore";
 import { createNewWindow } from "../../utils/tauriBridge";
@@ -11,6 +11,8 @@ export const ActivityBar: React.FC = () => {
     toggleSidebarTab,
     isTerminalOpen,
     toggleTerminal,
+    isEditorOpen,
+    toggleEditor,
   } = useLayoutStore();
   const { changes } = useGitStore();
 
@@ -64,14 +66,25 @@ export const ActivityBar: React.FC = () => {
         <button
           title="New Window (Ctrl+Shift+N)"
           onClick={() => createNewWindow()}
-          className="p-2.5 rounded transition-colors w-10 h-10 flex items-center justify-center text-vscode-textMuted hover:text-white hover:bg-vscode-hover"
+          className="p-2.5 rounded transition-colors w-10 h-10 flex items-center justify-center text-vscode-textMuted hover:text-white hover:bg-vscode-hover cursor-pointer"
         >
           <CopyPlus className="w-5 h-5" />
         </button>
         <button
+          title={isEditorOpen ? "Toggle File Editor / 关闭文件展示 (Ctrl+Alt+E)" : "Toggle File Editor / 打开文件展示 (Ctrl+Alt+E)"}
+          onClick={toggleEditor}
+          className={`p-2.5 rounded transition-colors w-10 h-10 flex items-center justify-center cursor-pointer ${
+            isEditorOpen
+              ? "text-vscode-activityBarActive bg-vscode-hover"
+              : "text-vscode-textMuted hover:text-white hover:bg-vscode-hover"
+          }`}
+        >
+          <FileCode className="w-5 h-5" />
+        </button>
+        <button
           title="Toggle Terminal Panel (`)"
           onClick={toggleTerminal}
-          className={`p-2.5 rounded transition-colors w-10 h-10 flex items-center justify-center ${
+          className={`p-2.5 rounded transition-colors w-10 h-10 flex items-center justify-center cursor-pointer ${
             isTerminalOpen
               ? "text-vscode-activityBarActive bg-vscode-hover"
               : "text-vscode-textMuted hover:text-white hover:bg-vscode-hover"

@@ -9,6 +9,7 @@ interface LayoutPreferences {
   terminal_height?: number;
   sidebar_visible?: boolean;
   terminal_visible?: boolean;
+  editor_visible?: boolean;
   active_sidebar_tab?: string;
 }
 
@@ -17,6 +18,7 @@ interface LayoutState {
   terminalHeight: number;
   isSidebarOpen: boolean;
   isTerminalOpen: boolean;
+  isEditorOpen: boolean;
   activeSidebarTab: SidebarTab;
 
   // Mobile responsive layout
@@ -31,6 +33,8 @@ interface LayoutState {
   setSidebarOpen: (open: boolean) => void;
   toggleTerminal: () => void;
   setTerminalOpen: (open: boolean) => void;
+  toggleEditor: () => void;
+  setEditorOpen: (open: boolean) => void;
   setActiveSidebarTab: (tab: SidebarTab) => void;
   toggleSidebarTab: (tab: SidebarTab) => void;
   resetLayout: () => void;
@@ -45,6 +49,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   terminalHeight: 240,
   isSidebarOpen: true,
   isTerminalOpen: true,
+  isEditorOpen: true,
   activeSidebarTab: "explorer",
 
   isMobile: typeof window !== "undefined" ? window.innerWidth < 768 : false,
@@ -72,6 +77,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       terminalHeight: 240,
       isSidebarOpen: true,
       isTerminalOpen: true,
+      isEditorOpen: true,
     });
     get().persistPreferences();
   },
@@ -93,6 +99,16 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
 
   setTerminalOpen: (open: boolean) => {
     set({ isTerminalOpen: open });
+    get().persistPreferences();
+  },
+
+  toggleEditor: () => {
+    set((state) => ({ isEditorOpen: !state.isEditorOpen }));
+    get().persistPreferences();
+  },
+
+  setEditorOpen: (open: boolean) => {
+    set({ isEditorOpen: open });
     get().persistPreferences();
   },
 
@@ -122,6 +138,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
           terminalHeight: prefs.terminal_height ?? 240,
           isSidebarOpen: prefs.sidebar_visible ?? true,
           isTerminalOpen: prefs.terminal_visible ?? true,
+          isEditorOpen: prefs.editor_visible ?? true,
           activeSidebarTab: (prefs.active_sidebar_tab as SidebarTab) ?? "explorer",
         });
       }
@@ -139,6 +156,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
         terminal_height: state.terminalHeight,
         sidebar_visible: state.isSidebarOpen,
         terminal_visible: state.isTerminalOpen,
+        editor_visible: state.isEditorOpen,
         active_sidebar_tab: state.activeSidebarTab,
       };
       try {

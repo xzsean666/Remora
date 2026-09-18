@@ -1,12 +1,12 @@
 import React, { useState } from "react";
-import { X, Circle, Save, Check } from "lucide-react";
+import { X, Circle, Save, Check, PanelTopClose } from "lucide-react";
 import { useEditorStore } from "../../stores/editorStore";
 import { useLayoutStore } from "../../stores/layoutStore";
 import { getFileIcon } from "../../utils/fileIcons";
 
 export const EditorTabBar: React.FC = () => {
   const { tabs, activeTabPath, setActiveTab, closeTab, pinTab, saveActiveFile } = useEditorStore();
-  const { isMobile } = useLayoutStore();
+  const { isMobile, setEditorOpen } = useLayoutStore();
   const [isSavedRecently, setIsSavedRecently] = useState(false);
 
   if (tabs.length === 0) return null;
@@ -91,8 +91,8 @@ export const EditorTabBar: React.FC = () => {
         })}
       </div>
 
-      {activeTab && (activeTab.fileType !== "image" || activeTab.viewMode === "source") && (
-        <div className="flex items-center px-2 flex-shrink-0 gap-1 border-l border-vscode-border/40">
+      <div className="flex items-center px-2 flex-shrink-0 gap-1 border-l border-vscode-border/40">
+        {activeTab && (activeTab.fileType !== "image" || activeTab.viewMode === "source") && (
           <button
             onClick={handleSave}
             title={activeTab.isDirty ? "Save file (Ctrl+S)" : "File is saved"}
@@ -117,8 +117,18 @@ export const EditorTabBar: React.FC = () => {
               </>
             )}
           </button>
-        </div>
-      )}
+        )}
+
+        {!isMobile && (
+          <button
+            onClick={() => setEditorOpen(false)}
+            title="关闭/收起文件展示 (Hide File View)"
+            className="p-1 rounded text-vscode-textMuted hover:text-vscode-textBright hover:bg-vscode-hover transition-colors cursor-pointer"
+          >
+            <PanelTopClose className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
     </div>
   );
 };

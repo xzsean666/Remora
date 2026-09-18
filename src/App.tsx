@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { Copy } from "lucide-react";
+import { Copy, FileCode, TerminalSquare } from "lucide-react";
 import { ActivityBar } from "./components/ActivityBar/ActivityBar";
 import { SidebarContainer } from "./components/Sidebar/SidebarContainer";
 import { Splitter } from "./components/Layout/Splitter";
@@ -41,6 +41,10 @@ export default function App() {
     setTerminalHeight,
     isSidebarOpen,
     isTerminalOpen,
+    setTerminalOpen,
+    isEditorOpen,
+    toggleEditor,
+    setEditorOpen,
     activeSidebarTab,
     toggleSidebarTab,
     initFromPreferences,
@@ -129,6 +133,11 @@ export default function App() {
         } else if (e.key === "g" || e.key === "G") {
           e.preventDefault();
           toggleSidebarTab("git");
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.altKey) {
+        if (e.key === "e" || e.key === "E") {
+          e.preventDefault();
+          toggleEditor();
         }
       }
     };
@@ -232,6 +241,7 @@ export default function App() {
         <ProjectExplorer
           onOpenFile={(path, isPreview) => {
             if (currentServerId) {
+              setEditorOpen(true);
               openFile(currentServerId, path, isPreview);
               if (isMobile) {
                 setMobileTab("editor");
@@ -391,24 +401,53 @@ export default function App() {
           {/* 3. Main Center + Bottom Panel Area */}
           <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-vscode-bg">
             {/* Editor Area */}
-            <EditorArea />
+            {isEditorOpen && <EditorArea />}
 
             {/* Bottom Panel (Terminal / Output) */}
             {isTerminalOpen && (
               <>
                 {/* Vertical Splitter between Editor and Bottom Panel */}
-                <Splitter
-                  direction="vertical"
-                  onDrag={(delta) => setTerminalHeight(terminalHeight - delta)}
-                />
+                {isEditorOpen && (
+                  <Splitter
+                    direction="vertical"
+                    onDrag={(delta) => setTerminalHeight(terminalHeight - delta)}
+                  />
+                )}
 
                 <div
-                  style={{ height: `${terminalHeight}px` }}
-                  className="border-t border-vscode-border flex flex-col flex-shrink-0 overflow-hidden"
+                  style={isEditorOpen ? { height: `${terminalHeight}px` } : undefined}
+                  className={`${
+                    isEditorOpen ? "border-t border-vscode-border flex-shrink-0" : "flex-1 min-h-0"
+                  } flex flex-col overflow-hidden`}
                 >
                   <TerminalPanel />
                 </div>
               </>
+            )}
+
+            {/* If both Editor and Terminal are closed */}
+            {!isEditorOpen && !isTerminalOpen && (
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center select-none">
+                <div className="max-w-sm p-6 rounded-xl border border-vscode-border/60 bg-vscode-sidebar/40 backdrop-blur-sm flex flex-col items-center gap-3 shadow-xl animate-in fade-in zoom-in-95 duration-150">
+                  <span className="text-xs text-vscode-textMuted">所有工作区主面板已收起</span>
+                  <div className="flex items-center gap-2 mt-1">
+                    <button
+                      onClick={() => setEditorOpen(true)}
+                      className="px-3 py-1.5 rounded bg-vscode-activityBarActive text-white text-xs hover:brightness-110 transition-all font-medium flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    >
+                      <FileCode className="w-3.5 h-3.5" />
+                      <span>打开文件展示</span>
+                    </button>
+                    <button
+                      onClick={() => setTerminalOpen(true)}
+                      className="px-3 py-1.5 rounded bg-vscode-hover text-vscode-textBright border border-vscode-border text-xs hover:bg-vscode-selected hover:text-white transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <TerminalSquare className="w-3.5 h-3.5" />
+                      <span>打开终端面板</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         </div>
