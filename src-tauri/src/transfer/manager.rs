@@ -10,6 +10,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 use russh_sftp::protocol::OpenFlags;
 
+use crate::connection::ConnectionManager;
 use crate::core::{AppError, Result};
 use crate::sftp::SftpService;
 use crate::transfer::model::{TransferDirection, TransferItem, TransferStatus};
@@ -23,6 +24,7 @@ struct TaskHandle {
 
 pub struct TransferManager {
     sftp: Arc<SftpService>,
+    connection: Option<Arc<ConnectionManager>>,
     tasks: Arc<RwLock<HashMap<String, Arc<TaskHandle>>>>,
 }
 
@@ -30,6 +32,15 @@ impl TransferManager {
     pub fn new(sftp: Arc<SftpService>) -> Self {
         Self {
             sftp,
+            connection: None,
+            tasks: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    pub fn with_connection(sftp: Arc<SftpService>, connection: Arc<ConnectionManager>) -> Self {
+        Self {
+            sftp,
+            connection: Some(connection),
             tasks: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -399,6 +410,163 @@ impl TransferManager {
         base.join("Remora")
     }
 
+    pub fn get_safe_local_download_path(desired_path: &Path) -> std::path::PathBuf {
+        if !desired_path.exists() {
+            return desired_path.to_path_buf();
+        }
+        let parent = desired_path.parent().unwrap_or_else(|| Path::new("."));
+        let filename_str = desired_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file");
+
+        let (base_name, ext) = if filename_str.ends_with(".tar.gz") {
+            (&filename_str[..filename_str.len() - 7], ".tar.gz")
+        } else if let Some(dot_pos) = filename_str.rfind('.') {
+            (&filename_str[..dot_pos], &filename_str[dot_pos..])
+        } else {
+            (filename_str, "")
+        };
+
+        let mut counter = 1;
+        loop {
+            let candidate = parent.join(format!("{}-{}{}", base_name, counter, ext));
+            if !candidate.exists() {
+                return candidate;
+            }
+            counter += 1;
+        }
+    }
+
+    pub fn build_folder_pack_script(remote_path: &str, remote_archive_path: &str) -> String {
+        use base64::prelude::*;
+        let target_b64 = BASE64_STANDARD.encode(remote_path.as_bytes());
+        let archive_b64 = BASE64_STANDARD.encode(remote_archive_path.as_bytes());
+
+        format!(
+            r#"decode_b64() {{ base64 -d 2>/dev/null || base64 --decode 2>/dev/null || base64 -D 2>/dev/null; }}
+TARGET_DIR=$(printf "%s" "{target_b64}" | decode_b64)
+ARCHIVE_PATH=$(printf "%s" "{archive_b64}" | decode_b64)
+
+if [ ! -d "$TARGET_DIR" ]; then
+    echo "ERROR: Target directory does not exist or is not a directory: $TARGET_DIR" >&2
+    exit 1
+fi
+
+mkdir -p "$(dirname "$ARCHIVE_PATH")" || exit 1
+FOLDER_NAME="$(basename "$TARGET_DIR")"
+PARENT_DIR="$(dirname "$TARGET_DIR")"
+SAFE_FOLDER_NAME=$(echo "$FOLDER_NAME" | sed 's/[,|\/]/_/g')
+
+if git -C "$TARGET_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    FILES_COUNT=$(git -C "$TARGET_DIR" ls-files --cached --others --exclude-standard 2>/dev/null | head -n 1 | wc -l)
+    if [ "$FILES_COUNT" -gt 0 ]; then
+        git -C "$TARGET_DIR" ls-files -z --cached --others --exclude-standard 2>/dev/null | \
+            tar -czf "$ARCHIVE_PATH" -C "$TARGET_DIR" --null -T - --transform "s,^,$SAFE_FOLDER_NAME/," 2>/dev/null
+    else
+        tar -czf "$ARCHIVE_PATH" -C "$PARENT_DIR" --files-from /dev/null --transform "s,^,$SAFE_FOLDER_NAME/," 2>/dev/null || \
+            tar -czf "$ARCHIVE_PATH" -C "$PARENT_DIR" "$FOLDER_NAME" 2>/dev/null
+    fi
+elif tar --help 2>&1 | grep -q "exclude-vcs-ignores"; then
+    tar --exclude-vcs --exclude-vcs-ignores -czf "$ARCHIVE_PATH" -C "$PARENT_DIR" "$FOLDER_NAME" 2>/dev/null
+else
+    tar --exclude-vcs --exclude='.git' --exclude='node_modules' --exclude='target' --exclude='dist' --exclude='.cache' \
+        -czf "$ARCHIVE_PATH" -C "$PARENT_DIR" "$FOLDER_NAME" 2>/dev/null
+fi
+
+if [ -f "$ARCHIVE_PATH" ]; then
+    ARCHIVE_SIZE=$(stat -c%s "$ARCHIVE_PATH" 2>/dev/null || stat -f%z "$ARCHIVE_PATH" 2>/dev/null || wc -c < "$ARCHIVE_PATH")
+    echo "SUCCESS:$ARCHIVE_SIZE"
+else
+    echo "ERROR: Failed to create archive" >&2
+    exit 1
+fi"#,
+            target_b64 = target_b64,
+            archive_b64 = archive_b64
+        )
+    }
+
+    pub async fn start_download_folder(
+        &self,
+        server_id: &str,
+        remote_path: &str,
+        local_path: &str,
+        app_handle: Option<tauri::AppHandle>,
+    ) -> Result<String> {
+        let connection = self.connection.clone().ok_or_else(|| {
+            AppError::Internal("SSH ConnectionManager is not initialized for folder archiving".into())
+        })?;
+
+        let trimmed_remote = remote_path.trim_end_matches('/');
+        let folder_name = Path::new(trimmed_remote)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .filter(|n| !n.is_empty())
+            .unwrap_or("archive")
+            .to_string();
+
+        let archive_filename = format!("{}.tar.gz", folder_name);
+
+        let effective_local_path = if local_path.trim().is_empty() {
+            let dir = Self::get_default_download_dir();
+            let desired = dir.join(&archive_filename);
+            Self::get_safe_local_download_path(&desired).to_string_lossy().to_string()
+        } else {
+            let desired = Path::new(local_path);
+            Self::get_safe_local_download_path(desired).to_string_lossy().to_string()
+        };
+
+        let task_id = Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().timestamp_millis();
+
+        let item = TransferItem {
+            id: task_id.clone(),
+            server_id: server_id.to_string(),
+            direction: TransferDirection::Download,
+            local_path: effective_local_path.clone(),
+            remote_path: remote_path.to_string(),
+            filename: archive_filename,
+            total_bytes: 0,
+            transferred_bytes: 0,
+            status: TransferStatus::Pending,
+            error_message: None,
+            speed_bps: 0,
+            started_at: now,
+            updated_at: now,
+        };
+
+        let task_handle = Arc::new(TaskHandle {
+            item: Arc::new(RwLock::new(item)),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        });
+
+        {
+            let mut tasks = self.tasks.write().await;
+            tasks.insert(task_id.clone(), task_handle.clone());
+        }
+
+        let sftp_service = self.sftp.clone();
+        let server_id_owned = server_id.to_string();
+        let remote_path_owned = remote_path.to_string();
+        let local_path_owned = effective_local_path;
+        let task_handle_clone = task_handle.clone();
+
+        tokio::spawn(async move {
+            Self::execute_download_folder(
+                connection,
+                sftp_service,
+                server_id_owned,
+                remote_path_owned,
+                local_path_owned,
+                task_handle_clone,
+                app_handle,
+            )
+            .await;
+        });
+
+        Ok(task_id)
+    }
+
     pub async fn start_download(
         &self,
         server_id: &str,
@@ -596,6 +764,220 @@ impl TransferManager {
         item.updated_at = chrono::Utc::now().timestamp_millis();
         Self::emit_progress(&app_handle, &item);
         info!("Download task {} completed successfully", item.id);
+    }
+
+    async fn execute_download_folder(
+        connection: Arc<ConnectionManager>,
+        sftp_service: Arc<SftpService>,
+        server_id: String,
+        remote_path: String,
+        local_path: String,
+        task: Arc<TaskHandle>,
+        app_handle: Option<tauri::AppHandle>,
+    ) {
+        {
+            let mut item = task.item.write().await;
+            item.status = TransferStatus::Transferring;
+            item.updated_at = chrono::Utc::now().timestamp_millis();
+            Self::emit_progress(&app_handle, &item);
+        }
+
+        let remote_archive = format!("/tmp/remora_archive_{}.tar.gz", Uuid::new_v4());
+        let script = Self::build_folder_pack_script(&remote_path, &remote_archive);
+
+        info!("Packaging folder {} on server {}", remote_path, server_id);
+        let pack_res = connection
+            .exec_command_with_timeout(&server_id, &script, std::time::Duration::from_secs(300))
+            .await;
+
+        let total_bytes = match pack_res {
+            Ok(output) => {
+                if let Some(pos) = output.find("SUCCESS:") {
+                    let size_str = output[pos + 8..].lines().next().unwrap_or("0").trim();
+                    size_str.parse::<u64>().unwrap_or(0)
+                } else {
+                    let err = format!("Remote packaging failed: {}", output.trim());
+                    let _ = connection
+                        .exec_command(&server_id, &format!("rm -f '{}'", remote_archive))
+                        .await;
+                    Self::fail_task(&task, &app_handle, err).await;
+                    return;
+                }
+            }
+            Err(e) => {
+                let _ = connection
+                    .exec_command(&server_id, &format!("rm -f '{}'", remote_archive))
+                    .await;
+                Self::fail_task(&task, &app_handle, format!("Folder packaging error: {}", e)).await;
+                return;
+            }
+        };
+
+        if task.cancelled.load(Ordering::SeqCst) {
+            info!("Download task {} was cancelled after packaging", task.item.read().await.id);
+            let _ = connection
+                .exec_command(&server_id, &format!("rm -f '{}'", remote_archive))
+                .await;
+            let mut item = task.item.write().await;
+            item.status = TransferStatus::Cancelled;
+            item.updated_at = chrono::Utc::now().timestamp_millis();
+            Self::emit_progress(&app_handle, &item);
+            return;
+        }
+
+        {
+            let mut item = task.item.write().await;
+            item.total_bytes = total_bytes;
+            item.updated_at = chrono::Utc::now().timestamp_millis();
+            Self::emit_progress(&app_handle, &item);
+        }
+
+        let session_res = sftp_service.get_or_create_session(&server_id).await;
+        let session = match session_res {
+            Ok(s) => s,
+            Err(e) => {
+                let _ = connection
+                    .exec_command(&server_id, &format!("rm -f '{}'", remote_archive))
+                    .await;
+                Self::fail_task(&task, &app_handle, format!("Failed to get SFTP session: {}", e)).await;
+                return;
+            }
+        };
+
+        let remote_file_res = {
+            let sftp = session.lock().await;
+            sftp.open_with_flags(&remote_archive, OpenFlags::READ).await
+        };
+
+        let mut remote_file = match remote_file_res {
+            Ok(f) => f,
+            Err(e) => {
+                let _ = connection
+                    .exec_command(&server_id, &format!("rm -f '{}'", remote_archive))
+                    .await;
+                Self::fail_task(
+                    &task,
+                    &app_handle,
+                    format!("Failed to open remote archive file: {}", e),
+                )
+                .await;
+                return;
+            }
+        };
+
+        if let Some(parent) = Path::new(&local_path).parent() {
+            if !parent.exists() {
+                if let Err(e) = tokio::fs::create_dir_all(parent).await {
+                    let _ = connection
+                        .exec_command(&server_id, &format!("rm -f '{}'", remote_archive))
+                        .await;
+                    Self::fail_task(
+                        &task,
+                        &app_handle,
+                        format!("Failed to create download directory: {}", e),
+                    )
+                    .await;
+                    return;
+                }
+            }
+        }
+
+        let mut local_file = match tokio::fs::File::create(&local_path).await {
+            Ok(f) => f,
+            Err(e) => {
+                let _ = connection
+                    .exec_command(&server_id, &format!("rm -f '{}'", remote_archive))
+                    .await;
+                Self::fail_task(&task, &app_handle, format!("Failed to create local file: {}", e)).await;
+                return;
+            }
+        };
+
+        let mut buffer = vec![0u8; CHUNK_SIZE];
+        let mut transferred = 0u64;
+        let start_time = Instant::now();
+        let mut last_emit = Instant::now();
+
+        loop {
+            if task.cancelled.load(Ordering::SeqCst) {
+                info!("Download task {} was cancelled", task.item.read().await.id);
+                drop(local_file);
+                let _ = tokio::fs::remove_file(&local_path).await;
+                let _ = connection
+                    .exec_command(&server_id, &format!("rm -f '{}'", remote_archive))
+                    .await;
+                let mut item = task.item.write().await;
+                item.status = TransferStatus::Cancelled;
+                item.updated_at = chrono::Utc::now().timestamp_millis();
+                Self::emit_progress(&app_handle, &item);
+                return;
+            }
+
+            let read_bytes = match remote_file.read(&mut buffer).await {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) => {
+                    let _ = connection
+                        .exec_command(&server_id, &format!("rm -f '{}'", remote_archive))
+                        .await;
+                    Self::fail_task(&task, &app_handle, format!("Read SFTP error: {}", e)).await;
+                    return;
+                }
+            };
+
+            if let Err(e) = local_file.write_all(&buffer[..read_bytes]).await {
+                let _ = connection
+                    .exec_command(&server_id, &format!("rm -f '{}'", remote_archive))
+                    .await;
+                Self::fail_task(&task, &app_handle, format!("Write local file error: {}", e)).await;
+                return;
+            }
+
+            transferred += read_bytes as u64;
+
+            if last_emit.elapsed().as_millis() >= 100 || transferred == total_bytes {
+                let elapsed_sec = start_time.elapsed().as_secs_f64();
+                let speed_bps = if elapsed_sec > 0.0 {
+                    (transferred as f64 / elapsed_sec) as u64
+                } else {
+                    0
+                };
+
+                let mut item = task.item.write().await;
+                item.transferred_bytes = transferred;
+                item.speed_bps = speed_bps;
+                item.updated_at = chrono::Utc::now().timestamp_millis();
+                Self::emit_progress(&app_handle, &item);
+                last_emit = Instant::now();
+            }
+        }
+
+        if let Err(e) = local_file.flush().await {
+            let _ = connection
+                .exec_command(&server_id, &format!("rm -f '{}'", remote_archive))
+                .await;
+            Self::fail_task(&task, &app_handle, format!("Flush local file error: {}", e)).await;
+            return;
+        }
+
+        // Clean up remote temporary archive
+        let _ = connection
+            .exec_command(&server_id, &format!("rm -f '{}'", remote_archive))
+            .await;
+
+        let mut item = task.item.write().await;
+        item.status = TransferStatus::Completed;
+        item.transferred_bytes = if total_bytes > 0 {
+            total_bytes
+        } else {
+            transferred
+        };
+        item.updated_at = chrono::Utc::now().timestamp_millis();
+        Self::emit_progress(&app_handle, &item);
+        info!(
+            "Folder archive download task {} completed successfully",
+            item.id
+        );
     }
 
     async fn fail_task(task: &Arc<TaskHandle>, app_handle: &Option<tauri::AppHandle>, error_message: String) {

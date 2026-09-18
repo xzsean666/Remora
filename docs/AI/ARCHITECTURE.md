@@ -132,6 +132,32 @@
     - 提供通用的 `OpenFolderModal` 弹窗，支持自定义路径、快捷路径填充（`~`、默认工作区、根路径）。
     - 自动将每次打开的工作区同步记录至 SQLite 的 `recent_projects` 表，支持 1-Click 快速进入。
 
+### 优化 10: 大数据与多模态文档流式窗口渲染引擎 (Streaming Windowed Document & Data Viewer)
+- **挑战**: 在远程开发中排查 PDF 文档、大型 CSV/TSV 以及数十万行的 Apache Parquet 列式二进制文件时，传统全量反序列化会导致 Webview 内存剧烈膨胀、UI 线程长时间卡死。
+- **架构方案**:
+  - **PDF 内存流式渲染**: 经由 SFTP 二进制流内存直传 `pdfjs-dist`，结合 `window.devicePixelRatio` 动态适应高 DPI 屏，支持缩放、适宽、旋转与直接下载，完全无需落盘。
+  - **CSV / TSV 双模无缝切换**: 基于 `papaparse` 自动识别分隔符与字段类型，在统一暗色数据网格（支持搜索、排序、分页与 CSV 导出）和 CodeMirror 6 源码编辑间一键平滑切换（支持 `Ctrl+E` / `Cmd+E`），修改后按 `Ctrl+S` 安全回写远程服务器。
+  - **Parquet 极速采样与全文件按需深度检索**:
+    - 基于 `hyparquet` 分片范围读取（`rowStart: 0, rowEnd: 1000`），首屏 1,000 行毫秒级秒开；
+    - 针对全量检索，采用后台 5,000 行分块滑动窗口异步流式扫描整份 Parquet 文件的所有 Row Groups，适时出让主线程事件循环驱动进度指示，兼顾高响应度与海量数据穿透。
+
+### 优化 11: 远端目录自适应 .gitignore 过滤打包下载机制 (Remote Folder Archive Download with .gitignore Rule Exclusion)
+- **挑战**: 用户在 Project Explorer 中下载大型代码仓库或模块文件夹时，若按目录递归 SFTP 下载，不仅树形遍历耗时长、网络连接开销巨大，而且会把动辄几百兆的临时构建物与缓存（如 `node_modules/`、`target/`、日志文件）一并下载，导致本地磁盘与带宽严重浪费。
+- **架构方案**:
+  - **远端自适应智能打包引擎 (`TransferManager.start_download_folder`)**:
+    - 命令路径通过 Base64 双向编解码安全传递，彻底阻断任何引号与特殊字符注入风险；
+    - 优先依托 Git 引擎（`git ls-files -z --cached --others --exclude-standard`），100% 遵从多级 `.gitignore` 与全局排除规则，天然规避 `.git/` 仓库自身与临时构建物，完整保留已追踪修改与新增的未忽略文件；
+    - 配合 `tar ... --transform "s,^,$SAFE_FOLDER_NAME/,"` 规范打包，确保解压后具备清晰的顶级目录包裹；
+    - 针对非 Git 目录，自动适配 GNU tar `--exclude-vcs-ignores` 解析 `.gitignore` 并辅以常见构建黑名单兜底；
+  - **流式 SFTP 传输与本地重名防覆盖**:
+    - 归档生成于 `/tmp/remora_archive_<uuid>.tar.gz`，经由流式分块通道传输至本地默认下载目录 `~/Downloads/Remora`；
+    - 引入 `get_safe_local_download_path` 自动按 `<folder>-1.tar.gz` 进行同名递增避让，避免覆盖本地已有文件；
+  - **全周期自愈与零残留清理**:
+    - 传输任务无论是正常完成、用户中途手动取消还是异常退出，系统均自动向远端异步派发 `rm -f` 命令彻底清理 `/tmp` 下的临时归档，杜绝远端磁盘垃圾沉淀；
+  - **交互与传输中心深度融入**:
+    - `ContextMenu.tsx` 中为目录展示带 `Archive` 图标的 `Download Folder (打包下载)` 菜单项，`FileTreeNode.tsx` 与根工作区均支持一键触发；
+    - 任务无缝接入侧边栏 `TransferPanel`，实时展现传输速率、百分比进度条与任务状态。
+
 ---
 
 ## 3. 技术栈选型
@@ -142,6 +168,8 @@
 | **前端框架** | React + TypeScript | 19.x / 5.x | 生态成熟，强类型，组件化开发标准 |
 | **状态管理** | Zustand | 5.x | 极简、无冗余样板代码、无上下文包裹、轻量高性能 |
 | **代码编辑器** | CodeMirror 6 | 6.x | 极度模块化、轻量级、针对长文件优化、移动与 IME 友好 |
+| **PDF 渲染引擎** | Mozilla PDF.js (pdfjs-dist) | 6.x | 跨平台像素级一致 Canvas 渲染，支持缩放、旋转与翻页 |
+| **数据表格与解析** | PapaParse + hyparquet | 5.x / 1.x | 纯 JS 极轻量解析，零 Wasm 依赖，支持 CSV/TSV 与 Apache Parquet 列式结构 |
 | **集成终端** | xterm.js | 5.x | 工业级终端模拟器，完美支持 ANSI、Unicode 及 IME 扩展 |
 | **样式与布局** | TailwindCSS | 3.x / 4.x | 高度自由的 Flex/Grid 布局，易实现 VS Code 风格拖拽面板 |
 | **后端异步运行时**| Tokio | 1.x | Rust 工业级高并发异步运行时 |
@@ -218,7 +246,14 @@ Remora/
     │   ├── components/
     │   │   ├── ActivityBar/
     │   │   ├── Sidebar/        # 包含 Project Explorer、Server List
-    │   │   ├── Editor/         # CodeMirror 6 多 Tab 编辑区
+    │   │   ├── Editor/         # 多模态文档与代码编辑区
+    │   │   │   ├── CodeEditor.tsx      # CodeMirror 6 代码编辑
+    │   │   │   ├── MarkdownViewer.tsx  # Markdown 富文本/分屏阅读器
+    │   │   │   ├── ImageViewer.tsx     # 远程图片预览与缩放平移
+    │   │   │   ├── PdfViewer.tsx       # PDF.js 高清 Canvas 渲染引擎
+    │   │   │   ├── CsvViewer.tsx       # CSV/TSV 表格与源码双模视图
+    │   │   │   ├── ParquetViewer.tsx   # Apache Parquet 列式数据与 Schema 预览
+    │   │   │   └── DataTableViewer.tsx # 通用暗色虚拟数据表格 (排序/搜索/分页/导出)
     │   │   ├── Terminal/       # xterm.js 容器与 Tab 栏
     │   │   ├── Transfer/       # 传输浮窗/面板
     │   │   ├── StatusBar/      # 底部状态栏 (SSH 状态、编码、光标位置)

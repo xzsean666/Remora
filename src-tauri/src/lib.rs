@@ -731,6 +731,21 @@ async fn transfer_download(
 }
 
 #[tauri::command]
+async fn transfer_download_folder(
+    server_id: String,
+    remote_path: String,
+    local_path: Option<String>,
+    state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
+) -> Result<String> {
+    let local_path_str = local_path.unwrap_or_default();
+    state
+        .transfer
+        .start_download_folder(&server_id, &remote_path, &local_path_str, Some(app))
+        .await
+}
+
+#[tauri::command]
 fn get_default_download_dir() -> Result<String> {
     let dir = crate::transfer::TransferManager::get_default_download_dir();
     if !dir.exists() {
@@ -1596,7 +1611,7 @@ pub fn run() {
             let connection = Arc::new(ConnectionManager::new());
             let sftp = Arc::new(SftpService::new(connection.clone()));
             let terminal = TerminalManager::new(connection.clone());
-            let transfer = TransferManager::new(sftp.clone());
+            let transfer = TransferManager::with_connection(sftp.clone(), connection.clone());
             let overview = Arc::new(OverviewService::new(connection.clone()));
 
             let app_state = Arc::new(AppState {
@@ -1654,6 +1669,7 @@ pub fn run() {
             terminal_close,
             transfer_upload,
             transfer_download,
+            transfer_download_folder,
             transfer_cancel,
             transfer_list,
             get_default_download_dir,

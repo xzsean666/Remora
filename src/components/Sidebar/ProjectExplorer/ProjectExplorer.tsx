@@ -87,7 +87,7 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
     cancelDelete,
   } = useFileTreeStore();
 
-  const { uploadFile } = useTransferStore();
+  const { uploadFile, downloadFolder } = useTransferStore();
 
   const {
     serversList,
@@ -1461,6 +1461,16 @@ export const ProjectExplorer: React.FC<ProjectExplorerProps> = ({ onOpenFile }) 
               });
             }
           }}
+          onDownload={
+            rootPath && (currentServerId || activeServerId)
+              ? () => {
+                  const targetSrv = currentServerId || activeServerId!;
+                  downloadFolder(targetSrv, rootPath);
+                  const folderName = rootPath.split("/").filter(Boolean).pop() || "workspace";
+                  showClipboardToast(`已开始打包下载工作区: ${folderName}`);
+                }
+              : undefined
+          }
         />
       )}
 

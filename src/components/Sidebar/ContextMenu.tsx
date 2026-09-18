@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { FilePlus, FolderPlus, Edit2, Trash2, Copy, RefreshCw, Download, Terminal, ClipboardPaste } from "lucide-react";
+import { FilePlus, FolderPlus, Edit2, Trash2, Copy, RefreshCw, Download, Terminal, ClipboardPaste, Archive } from "lucide-react";
 
 export interface ContextMenuAction {
   label: string;
@@ -195,7 +195,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         </button>
       )}
 
-      {onDownload && !isDir && (
+      {onDownload && (
         <button
           onClick={() => {
             onDownload();
@@ -203,8 +203,12 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           }}
           className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-vscode-selected hover:text-white transition-colors text-left"
         >
-          <Download className="w-4 h-4 opacity-80" />
-          <span>Download...</span>
+          {isDir ? (
+            <Archive className="w-4 h-4 opacity-80" />
+          ) : (
+            <Download className="w-4 h-4 opacity-80" />
+          )}
+          <span>{isDir ? "Download Folder (打包下载)" : "Download..."}</span>
         </button>
       )}
 

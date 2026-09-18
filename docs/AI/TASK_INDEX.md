@@ -76,21 +76,28 @@
 | **TASK-065** | 远程目录粘贴剪贴板图片与本地文件支持 (Remote Folder Clipboard Image & File Paste Support) | TASK-004, TASK-007, TASK-010, TASK-054 | **DONE** | `docs/AI/tasks/TASK-065.md` |
 | **TASK-066** | 优化 build.sh release 构建归档逻辑 (按需精准产物归档、去重与清理) | TASK-050 | **DONE** | `docs/AI/tasks/TASK-066.md` |
 | **TASK-067** | IDE 默认 Markdown 富文本阅读渲染与源码/分屏编辑模式支持 (Default Markdown Reader View & Source/Split Edit Modes) | TASK-008, TASK-054 | **DONE** | `docs/AI/tasks/TASK-067.md` |
+| **TASK-068** | IDE 常规文档与数据格式深度支持 (PDF 预览、CSV/TSV 表格网格与源码双模、Parquet 列式数据与 Schema 预览) | TASK-008, TASK-067 | **DONE** | `docs/AI/tasks/TASK-068.md` |
+| **TASK-069** | Parquet 首屏极速采样切片加载与全文件按需深度检索支持 (Parquet Windowed Sample Loading & Full-File Deep Search) | TASK-068 | **DONE** | `docs/AI/tasks/TASK-069.md` |
+| **TASK-070** | 远端文件浏览文件夹打包下载与 .gitignore 规则过滤支持 (Remote Folder Archive Download with .gitignore Rule Exclusion) | TASK-004, TASK-007, TASK-010, TASK-047, TASK-057 | **DONE** | `docs/AI/tasks/TASK-070.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 68
+- **已完成 (DONE)**: 71
 - **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 68
+- **总任务数**: 71
 
 ---
 
 ## 3. 项目执行总结
 
+- **TASK-070** 圆满完成：远端文件浏览文件夹打包下载与 .gitignore 规则过滤支持 (Remote Folder Archive Download with .gitignore Rule Exclusion)。彻底满足用户在文件浏览器中一键打包下载任意文件夹及完整工作区、且自动忽略 `.gitignore` 中排除文件的刚性需求：1) **全链路自适应远端打包引擎 (`TransferManager.start_download_folder`)**：在 Rust 后端扩展 `TransferManager` 支持 `ConnectionManager` 远端命令执行管线；通过 Base64 传递目录路径安全防注入；打包脚本优先采用 Git 引擎（`git ls-files -z --cached --others --exclude-standard`）精确识别 `.gitignore` 规则，天然过滤 `.git/` 本身与各类被忽略临时产物（如 `node_modules`、`target`、日志），并使用 `--transform` 保留顶级文件夹名；脱离 Git 时自动检测 GNU tar `--exclude-vcs-ignores` 与常见排除兜底；2) **防冲突本地自动递增与流式下载**：默认保存至 `~/Downloads/Remora/<folder>.tar.gz`，若存在同名文件自动按 `<folder>-1.tar.gz` 递增避让，杜绝覆盖历史文件；基于 SFTP 异步流式下载，每 100ms 刷新速率与进度，并在完成后或取消时自动向远端发送 `rm -f` 彻底清理 `/tmp` 临时归档，零磁盘残留；3) **VS Code 级上下文菜单无缝集成**：`ContextMenu.tsx` 中为目录展示带 `Archive` 图标的 `Download Folder (打包下载)` 选项，`FileTreeNode.tsx` 与根工作区均支持一键触发并弹出 Toast；4) 前端 TypeScript 0 报错，前端构建成功，41 项 Rust 单元测试与 1 项 E2E 测试全量 100% 通过。
+
+- **TASK-069** 圆满完成：Parquet 首屏极速采样切片加载与全文件按需深度检索支持 (Parquet Windowed Sample Loading & Full-File Deep Search)。针对现代大数据与训练集 Parquet 文件体量庞大、全量加载导致 UI 卡顿的痛点，创新性落地分片采样与流式深度扫描引擎：1) **首屏 1,000 行极速秒开**：通过 `parquetReadObjects` 切片范围读取（`rowStart: 0, rowEnd: 1000`），无论原文件包含数十万还是数百万行均毫秒级瞬间呈现；2) **全文件深度分块检索 (Deep File Search)**：在搜索框输入关键词后，提供【全文件深度检索】触发按钮，通过后台 5,000 行分块滑动窗口异步遍历扫描整份 Parquet 文件的所有 Row Groups；基于微任务让出主线程，实时驱动进度条与扫描条数刷新，检索完成后将全量匹配行注入表格并提示匹配率；3) **分批追加扩充加载**：工具栏配备 `+1,000` 追加加载与 50,000 行以内的 `Load All` 加载全部；4) **一键还原采样**：随时点击【返回采样预览】无缝切换回前 1,000 行；5) 前端打包与 36 项 Rust 测试全量 100% 通过。
+- **TASK-068** 圆满完成：IDE 常规文档与数据格式深度支持 (PDF Preview, CSV/TSV Table Grid & Source Code Modes, Parquet Columnar Data & Schema Viewer)。彻底解决远程开发中排查非纯代码常规文档与结构化数据的痛点：1) **PDF 高清 Canvas 渲染引擎 (`PdfViewer.tsx`)**：引入 Mozilla 官方 `pdfjs-dist` (v6)，基于内存二进制流无损解码，适配高 DPI Canvas 渲染，文字清晰锐利；提供缩放（缩小、放大、100% 重置、Fit Width 适应宽度）、前后翻页与页码跳转输入、顺时针 90° 旋转与一键下载；2) **通用暗色虚拟数据表格 (`DataTableViewer.tsx`)**：深度契合 VS Code 调色板，提供实时全文搜索过滤、列头点击三态排序、分页控制（25~500 行）、列宽自适应与冻结置顶表头、双击复制单元格与一键复制整行 JSON、导出为 CSV；3) **CSV / TSV 表格网格与源码双模 (`CsvViewer.tsx`)**：集成 `papaparse` 自动推断分隔符与数据类型，支持顶栏与 `Ctrl+E` / `Cmd+E` 快捷键在【表格数据视图】与【源码编辑模式】间无缝切换，源码模式修改后按 `Ctrl+S` 安全保存回写远程 SFTP；4) **Apache Parquet 列式数据与 Schema 检查器 (`ParquetViewer.tsx`)**：集成轻量级纯 JS `hyparquet`，支持 Snappy 解压与 BigInt 安全序列化，提供【行数据网格】与【Schema 结构树与元数据】双视图，详细解析每列字段名、逻辑类型、物理类型、Repetition 规范、压缩算法及总行数；5) **文件图标增强**：为 `.pdf`（红）、`.csv`/`.tsv`（绿）、`.parquet`（紫）赋予专属高识别度文件图标；TypeScript 0 报错，前端构建成功，36 项 Rust 测试全量 100% 通过。
 - **TASK-067** 圆满完成：IDE 默认 Markdown 富文本阅读渲染与源码/分屏编辑模式支持 (Default Markdown Reader View & Source/Split Edit Modes)。彻底满足用户对 Markdown 默认阅读与高质量编辑的全部诉求：1) **默认阅读模式**：打开任何 `.md`、`.markdown` 等文件默认以高品质富文本阅读视图打开（非纯等宽代码）；若携带跳转定位 `targetPosition` 则自动切换至源码编辑模式；2) **高端富文本渲染引擎 (`MarkdownViewer.tsx`)**：深度融合 VS Code 深色暗色主题，集成 `marked` (v18) 与 `highlight.js` (v11)；完整支持层级标题锚点跳转、GitHub 风格 Alert 提示卡片（`[!NOTE]`, `[!TIP]`, `[!WARNING]`, `[!IMPORTANT]`, `[!CAUTION]`）、带语言 Badge 徽标与一键复制代码块、GFM 表格水平自适应横滚、任务复选框及安全外部链接跳转；3) **浮动大纲目录 (TOC) 与文档指标**：解析 H1-H3 标题提供可折叠大纲抽屉，点击平滑滚动直达；底部微状态栏实时统计中英文字数、行数与预估阅读时间；4) **三模合一与分屏实时联动 (`EditorArea.tsx`)**：顶栏提供 `📖 阅读`、`✏️ 编辑`、`◫ 分屏` 模式切换胶囊，支持全局快捷键 `Ctrl+E` / `Cmd+E` 与 `Ctrl+Shift+V` 随时切换；分屏模式下左侧编辑右侧实时渲染（带 60ms 防抖保证 60fps 丝滑输入）；`Ctrl+S` 无缝保存回写远程 SFTP。
 - **TASK-066** 圆满完成：优化 build.sh release 构建归档逻辑 (按需精准产物归档、去重与清理)。彻底治理 release 目录下冗余文件膨胀与重复拷贝问题：1) **按需模式解耦**：当用户指定 `--deb` 构建时，构建前自动清理 `bundle/deb` 历史残留，构建后**仅**归档当前版本的 `Remora_${APP_VERSION}_*.deb` 及签名和校验和，严禁拷贝未打包的 raw binary (`remora` / `remora-linux_x64-v*`)，不再拷贝历史 AppImage 或旧版本 deb；2) **彻底废除 `ARCH_RELEASE_DIR`**：移除 `release/desktop/linux_x64` 双重物理拷贝目录，顶层维持 `release/linux_x64 -> desktop` 软链接；3) **独立二进制去重**：`--no-bundle` 模式下版本名通过软链接创建，不再物理生成两份 30MB 二进制；4) **Android APK 去重**：仅归档规范版本命名的单一 APK；5) 磁盘占用从 904MB 骤降至 41MB，deb 构建输出 100% 纯净规范。
 - **TASK-065** 圆满完成：远程目录粘贴剪贴板图片与本地文件支持 (Remote Folder Clipboard Image & File Paste Support)。核心落地四大功能：1) **Rust 后端 SFTP 二进制原子写入与自动重连**：在 `src-tauri/src/sftp/service.rs` 实现 `write_binary_file`，通过 `BASE64_STANDARD.decode` 解码并将原始图片字节无损写入远端服务器文件；在 `lib.rs` 暴露 `sftp_write_binary_file` Tauri 命令并在 `sftp/tests.rs` 中补充 Base64 与 PNG 魔数测试；2) **前端多源剪贴板解析引擎**：在 `clipboard.ts` 封装 `readClipboardImage`、`blobToBase64` 与 `getImageExtension`，支持系统截图 Blob、复制的本地文件、Base64 Data URL 与文件 URL；3) **VS Code 级智能命名与冲突处理**：截图默认生成 `image.png`，若已存在自动递增为 `image-1.png`、`image-2.png`，避免打断连续截屏工作流；具名文件重名无缝唤起冲突处理弹窗；4) **右键菜单与全局快捷键感知**：在 `ContextMenu.tsx` 中添加带 `ClipboardPaste` 图标与 `Ctrl+V` 徽标的“粘贴 (Paste)”菜单项；在 `ProjectExplorer.tsx` 监听全局 `Ctrl+V` / `Cmd+V` 与 `paste` 事件，避让输入框、CodeMirror 与终端，精准解析当前选中目标目录并在成功后自动展开目录、刷新树并弹出 Toast。

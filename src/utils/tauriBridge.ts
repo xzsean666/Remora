@@ -452,6 +452,9 @@ export async function safeInvoke<T = any>(cmd: string, args?: Record<string, any
     case "transfer_download": {
       return `mock-download-${Date.now()}` as unknown as T;
     }
+    case "transfer_download_folder": {
+      return `mock-download-folder-${Date.now()}` as unknown as T;
+    }
     case "transfer_list": {
       return [] as unknown as T;
     }
@@ -662,6 +665,27 @@ export function isMarkdownFilePath(path: string): boolean {
   const ext = path.split(".").pop()?.toLowerCase();
   return ext ? MARKDOWN_EXTENSIONS.has(ext) : false;
 }
+
+const CSV_EXTENSIONS = new Set(["csv", "tsv"]);
+
+export function isCsvFilePath(path: string): boolean {
+  if (!path) return false;
+  const ext = path.split(".").pop()?.toLowerCase();
+  return ext ? CSV_EXTENSIONS.has(ext) : false;
+}
+
+export function isPdfFilePath(path: string): boolean {
+  if (!path) return false;
+  const ext = path.split(".").pop()?.toLowerCase();
+  return ext === "pdf";
+}
+
+export function isParquetFilePath(path: string): boolean {
+  if (!path) return false;
+  const ext = path.split(".").pop()?.toLowerCase();
+  return ext === "parquet" || ext === "pq";
+}
+
 
 export interface ReadBinaryFileResponse {
   data_base64: string;

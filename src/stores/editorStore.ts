@@ -4,6 +4,9 @@ import {
   formatErrorMessage,
   isImageFilePath,
   isMarkdownFilePath,
+  isPdfFilePath,
+  isCsvFilePath,
+  isParquetFilePath,
   type ReadBinaryFileResponse,
 } from "../utils/tauriBridge";
 import { clearEditorCache } from "../utils/editorCache";
@@ -19,12 +22,13 @@ export interface EditorTab {
   isPreview: boolean;
   cursor?: { line: number; ch: number };
   targetPosition?: { line: number; ch?: number };
-  fileType?: "text" | "image" | "markdown";
+  fileType?: "text" | "image" | "markdown" | "pdf" | "csv" | "parquet";
   imageDataUrl?: string;
+  binaryBase64?: string;
   mimeType?: string;
   fileSize?: number;
   svgSource?: string;
-  viewMode?: "preview" | "source" | "split";
+  viewMode?: "preview" | "source" | "split" | "grid";
 }
 
 export interface ConflictInfo {
@@ -61,6 +65,8 @@ interface EditorState {
   toggleSvgViewMode: (path: string) => void;
   setMarkdownViewMode: (path: string, mode: "preview" | "source" | "split") => void;
   toggleMarkdownViewMode: (path: string) => void;
+  setCsvViewMode: (path: string, mode: "grid" | "source") => void;
+  toggleCsvViewMode: (path: string) => void;
   saveActiveFile: () => Promise<boolean>;
   saveFile: (path: string, forceOverwrite?: boolean) => Promise<boolean>;
   resolveConflict: (action: "overwrite" | "reload" | "cancel") => Promise<void>;
@@ -99,6 +105,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     try {
       const isImg = isImageFilePath(path);
       const isMd = isMarkdownFilePath(path);
+      const isPdf = isPdfFilePath(path);
+      const isParquet = isParquetFilePath(path);
+      const isCsv = isCsvFilePath(path);
       const fileName = path.split("/").filter(Boolean).pop() || path;
       let newTab: EditorTab;
 
@@ -135,6 +144,70 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           fileSize: res.size,
           svgSource,
           viewMode: "preview",
+        };
+      } else if (isPdf) {
+        const res = await invoke<ReadBinaryFileResponse>("sftp_read_binary_file", {
+          serverId,
+          path,
+        });
+
+        newTab = {
+          serverId,
+          path,
+          name: fileName,
+          content: "",
+          savedContent: "",
+          mtime: res.mtime,
+          isDirty: false,
+          isPreview,
+          targetPosition,
+          fileType: "pdf",
+          binaryBase64: res.data_base64,
+          mimeType: "application/pdf",
+          fileSize: res.size,
+          viewMode: "preview",
+        };
+      } else if (isParquet) {
+        const res = await invoke<ReadBinaryFileResponse>("sftp_read_binary_file", {
+          serverId,
+          path,
+        });
+
+        newTab = {
+          serverId,
+          path,
+          name: fileName,
+          content: "",
+          savedContent: "",
+          mtime: res.mtime,
+          isDirty: false,
+          isPreview,
+          targetPosition,
+          fileType: "parquet",
+          binaryBase64: res.data_base64,
+          mimeType: "application/vnd.apache.parquet",
+          fileSize: res.size,
+          viewMode: "grid",
+        };
+      } else if (isCsv) {
+        const res = await invoke<ReadFileResponse>("sftp_read_file", {
+          serverId,
+          path,
+        });
+
+        newTab = {
+          serverId,
+          path,
+          name: fileName,
+          content: res.content,
+          savedContent: res.content,
+          mtime: res.mtime,
+          isDirty: false,
+          isPreview,
+          targetPosition,
+          fileType: "csv",
+          fileSize: res.size,
+          viewMode: targetPosition ? "source" : "grid",
         };
       } else if (isMd) {
         const res = await invoke<ReadFileResponse>("sftp_read_file", {
@@ -233,6 +306,28 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     updatedTabs[idx] = { ...tab, viewMode: newMode };
     set({ tabs: updatedTabs });
   },
+
+  setCsvViewMode: (path: string, mode: "grid" | "source") => {
+    const { tabs } = get();
+    const idx = tabs.findIndex((t) => t.path === path);
+    if (idx === -1) return;
+    const tab = tabs[idx];
+    const updatedTabs = [...tabs];
+    updatedTabs[idx] = { ...tab, viewMode: mode };
+    set({ tabs: updatedTabs });
+  },
+
+  toggleCsvViewMode: (path: string) => {
+    const { tabs } = get();
+    const idx = tabs.findIndex((t) => t.path === path);
+    if (idx === -1) return;
+    const tab = tabs[idx];
+    const newMode = tab.viewMode === "grid" ? "source" : "grid";
+    const updatedTabs = [...tabs];
+    updatedTabs[idx] = { ...tab, viewMode: newMode };
+    set({ tabs: updatedTabs });
+  },
+
 
   closeTab: (path: string) => {
     const { tabs, activeTabPath } = get();

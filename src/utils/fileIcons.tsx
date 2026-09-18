@@ -11,6 +11,8 @@ import {
   File,
   Boxes,
   Image as ImageIcon,
+  FileSpreadsheet,
+  Database,
 } from "lucide-react";
 
 export function getFileIcon(fileName: string, isDir: boolean, isOpen: boolean): React.ReactNode {
@@ -52,6 +54,14 @@ export function getFileIcon(fileName: string, isDir: boolean, isOpen: boolean): 
     case "md":
     case "txt":
       return <FileText className="w-4 h-4 text-sky-400 flex-shrink-0" />;
+    case "pdf":
+      return <FileText className="w-4 h-4 text-rose-500 flex-shrink-0" />;
+    case "csv":
+    case "tsv":
+      return <FileSpreadsheet className="w-4 h-4 text-emerald-400 flex-shrink-0" />;
+    case "parquet":
+    case "pq":
+      return <Database className="w-4 h-4 text-violet-400 flex-shrink-0" />;
     case "toml":
     case "yaml":
     case "yml":

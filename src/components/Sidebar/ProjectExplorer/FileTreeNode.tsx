@@ -8,7 +8,7 @@ import { useLayoutStore } from "../../../stores/layoutStore";
 import { getFileIcon } from "../../../utils/fileIcons";
 import { NewItemInput } from "./NewItemInput";
 import { ContextMenu } from "../ContextMenu";
-import { copyTextToClipboard } from "../../../utils/clipboard";
+import { copyTextToClipboard, showClipboardToast } from "../../../utils/clipboard";
 
 interface FileTreeNodeProps {
   entry: FileEntry;
@@ -60,7 +60,7 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = React.memo(({
   const renameItem = useFileTreeStore((s) => s.renameItem);
   const requestDelete = useFileTreeStore((s) => s.requestDelete);
   const refreshPath = useFileTreeStore((s) => s.refreshPath);
-  const { downloadFile } = useTransferStore();
+  const { downloadFile, downloadFolder } = useTransferStore();
 
   const changes = useGitStore((s) => s.changes);
   const ignored = useGitStore((s) => s.ignored);
@@ -421,8 +421,15 @@ export const FileTreeNode: React.FC<FileTreeNodeProps> = React.memo(({
             }
           }}
           onDownload={
-            !entry.is_dir && currentServerId
-              ? () => downloadFile(currentServerId, entry.path)
+            currentServerId
+              ? () => {
+                  if (entry.is_dir) {
+                    downloadFolder(currentServerId, entry.path);
+                    showClipboardToast(`已开始打包下载文件夹: ${entry.name}`);
+                  } else {
+                    downloadFile(currentServerId, entry.path);
+                  }
+                }
               : undefined
           }
         />

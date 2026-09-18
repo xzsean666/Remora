@@ -6,6 +6,9 @@ import { EditorTabBar } from "./EditorTabBar";
 import { CodeEditor } from "./CodeEditor";
 import { ImageViewer } from "./ImageViewer";
 import { MarkdownViewer } from "./MarkdownViewer";
+import { PdfViewer } from "./PdfViewer";
+import { CsvViewer } from "./CsvViewer";
+import { ParquetViewer } from "./ParquetViewer";
 import { ConflictModal } from "./ConflictModal";
 import {
   Code2,
@@ -17,6 +20,8 @@ import {
   PenLine,
   Columns2,
   FileText,
+  FileSpreadsheet,
+  Table,
 } from "lucide-react";
 
 export const EditorArea: React.FC = () => {
@@ -27,31 +32,40 @@ export const EditorArea: React.FC = () => {
     toggleSvgViewMode,
     setMarkdownViewMode,
     toggleMarkdownViewMode,
+    setCsvViewMode,
+    toggleCsvViewMode,
   } = useEditorStore();
   const { status, reconnectAttempt, reconnect } = useConnectionStore();
   const { isMobile } = useLayoutStore();
   const activeTab = tabs.find((t) => t.path === activeTabPath);
 
-  // Global shortcut (Ctrl+E / Cmd+E or Ctrl+Shift+V) to toggle Markdown view mode
+  // Global shortcut (Ctrl+E / Cmd+E or Ctrl+Shift+V) to toggle Markdown / CSV view mode
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!activeTab || activeTab.fileType !== "markdown") return;
+      if (!activeTab) return;
 
       const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
       const modKey = isMac ? e.metaKey : e.ctrlKey;
 
-      if (modKey && (e.key === "e" || e.key === "E")) {
-        e.preventDefault();
-        toggleMarkdownViewMode(activeTab.path);
-      } else if (modKey && e.shiftKey && (e.key === "v" || e.key === "V")) {
-        e.preventDefault();
-        toggleMarkdownViewMode(activeTab.path);
+      if (activeTab.fileType === "markdown") {
+        if (modKey && (e.key === "e" || e.key === "E")) {
+          e.preventDefault();
+          toggleMarkdownViewMode(activeTab.path);
+        } else if (modKey && e.shiftKey && (e.key === "v" || e.key === "V")) {
+          e.preventDefault();
+          toggleMarkdownViewMode(activeTab.path);
+        }
+      } else if (activeTab.fileType === "csv") {
+        if (modKey && (e.key === "e" || e.key === "E")) {
+          e.preventDefault();
+          toggleCsvViewMode(activeTab.path);
+        }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeTab?.path, activeTab?.fileType, activeTab?.viewMode, toggleMarkdownViewMode]);
+  }, [activeTab?.path, activeTab?.fileType, activeTab?.viewMode, toggleMarkdownViewMode, toggleCsvViewMode]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden bg-vscode-bg relative">
@@ -94,6 +108,71 @@ export const EditorArea: React.FC = () => {
         {activeTab ? (
           activeTab.fileType === "image" && activeTab.viewMode !== "source" ? (
             <ImageViewer key={activeTab.path} tab={activeTab} />
+          ) : activeTab.fileType === "pdf" ? (
+            <PdfViewer key={activeTab.path} tab={activeTab} />
+          ) : activeTab.fileType === "parquet" ? (
+            <ParquetViewer key={activeTab.path} tab={activeTab} />
+          ) : activeTab.fileType === "csv" ? (
+            <div className="w-full h-full flex flex-col relative">
+              {/* CSV Mode Switcher Bar */}
+              <div className="h-8 px-3 bg-vscode-sidebar/90 border-b border-vscode-border/80 flex items-center justify-between text-xs text-vscode-textMuted flex-shrink-0 select-none">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-medium text-[11px] text-vscode-textBright/90 flex items-center gap-1.5 truncate">
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                    <span className="truncate">{activeTab.name}</span>
+                  </span>
+                  {activeTab.viewMode !== "source" ? (
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                      表格数据视图
+                    </span>
+                  ) : (
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                      源码编辑模式
+                    </span>
+                  )}
+                </div>
+
+                {/* Mode Switcher Buttons */}
+                <div className="flex items-center gap-1">
+                  <div className="flex items-center bg-vscode-bg/80 p-0.5 rounded border border-vscode-border/70 text-[11px]">
+                    <button
+                      onClick={() => setCsvViewMode(activeTab.path, "grid")}
+                      className={`px-2 py-0.5 rounded flex items-center gap-1 transition-all ${
+                        activeTab.viewMode !== "source"
+                          ? "bg-vscode-activityBarActive text-white font-medium shadow-xs"
+                          : "text-vscode-textMuted hover:text-vscode-text hover:bg-white/5"
+                      }`}
+                      title="表格数据视图 (Table Grid, Ctrl+E)"
+                    >
+                      <Table className="w-3 h-3" />
+                      <span>表格</span>
+                    </button>
+
+                    <button
+                      onClick={() => setCsvViewMode(activeTab.path, "source")}
+                      className={`px-2 py-0.5 rounded flex items-center gap-1 transition-all ${
+                        activeTab.viewMode === "source"
+                          ? "bg-vscode-activityBarActive text-white font-medium shadow-xs"
+                          : "text-vscode-textMuted hover:text-vscode-text hover:bg-white/5"
+                      }`}
+                      title="源码编辑模式 (Source Code, Ctrl+E)"
+                    >
+                      <PenLine className="w-3 h-3" />
+                      <span>源码</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Content depending on viewMode */}
+              <div className="flex-1 min-h-0 min-w-0 relative overflow-hidden">
+                {activeTab.viewMode !== "source" ? (
+                  <CsvViewer key={activeTab.path} tab={activeTab} />
+                ) : (
+                  <CodeEditor key={activeTab.path} tab={activeTab} />
+                )}
+              </div>
+            </div>
           ) : activeTab.fileType === "markdown" ? (
             <div className="w-full h-full flex flex-col relative">
               {/* Markdown Mode Switcher Bar */}

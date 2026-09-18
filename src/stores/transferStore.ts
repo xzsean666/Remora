@@ -27,6 +27,7 @@ interface TransferState {
   listenProgress: () => Promise<() => void>;
   uploadFile: (serverId: string, localPath: string, remotePath: string) => Promise<string>;
   downloadFile: (serverId: string, remotePath: string, localPath?: string) => Promise<string>;
+  downloadFolder: (serverId: string, remotePath: string, localPath?: string) => Promise<string>;
   cancelTransfer: (taskId: string) => Promise<void>;
   clearCompleted: () => void;
   openDownloadDir: () => Promise<string>;
@@ -76,6 +77,16 @@ export const useTransferStore = create<TransferState>((set, get) => ({
 
   downloadFile: async (serverId: string, remotePath: string, localPath?: string) => {
     const taskId = await invoke<string>("transfer_download", {
+      serverId,
+      remotePath,
+      localPath: localPath || null,
+    });
+    get().fetchTransfers();
+    return taskId;
+  },
+
+  downloadFolder: async (serverId: string, remotePath: string, localPath?: string) => {
+    const taskId = await invoke<string>("transfer_download_folder", {
       serverId,
       remotePath,
       localPath: localPath || null,
