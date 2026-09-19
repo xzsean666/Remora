@@ -450,6 +450,7 @@ pub fn encode_rgba_to_png_base64(width: u32, height: u32, rgba_bytes: &[u8]) -> 
     Ok(BASE64_STANDARD.encode(&png_bytes))
 }
 
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 async fn read_clipboard_image_native() -> Result<Option<String>> {
     tokio::task::spawn_blocking(|| {
@@ -475,6 +476,12 @@ async fn read_clipboard_image_native() -> Result<Option<String>> {
     })
     .await
     .map_err(|e| AppError::Internal(format!("Clipboard task join error: {}", e)))?
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+async fn read_clipboard_image_native() -> Result<Option<String>> {
+    Ok(None)
 }
 
 #[tauri::command]
