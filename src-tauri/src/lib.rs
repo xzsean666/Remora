@@ -925,6 +925,15 @@ pub struct GitFileChange {
     pub raw_status: String,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct GitCommitInfo {
+    pub hash: String,
+    pub short_hash: String,
+    pub subject: String,
+    pub author: String,
+    pub date_relative: String,
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct GitStatusResult {
     pub is_repo: bool,
@@ -932,7 +941,36 @@ pub struct GitStatusResult {
     pub branches: Vec<String>,
     pub changes: Vec<GitFileChange>,
     pub ignored: Vec<String>,
+    pub upstream: Option<String>,
+    pub ahead: u32,
+    pub behind: u32,
+    pub outgoing_commits: Vec<GitCommitInfo>,
+    pub incoming_commits: Vec<GitCommitInfo>,
+    pub recent_commits: Vec<GitCommitInfo>,
     pub error: Option<String>,
+}
+
+fn parse_git_commit_line(line: &str) -> Option<GitCommitInfo> {
+    let parts: Vec<&str> = line.split('\t').collect();
+    if parts.len() >= 5 {
+        Some(GitCommitInfo {
+            hash: parts[0].to_string(),
+            short_hash: parts[1].to_string(),
+            subject: parts[2].to_string(),
+            author: parts[3].to_string(),
+            date_relative: parts[4].to_string(),
+        })
+    } else if parts.len() >= 3 {
+        Some(GitCommitInfo {
+            hash: parts[0].to_string(),
+            short_hash: parts[0].chars().take(7).collect(),
+            subject: parts[1].to_string(),
+            author: parts[2].to_string(),
+            date_relative: String::new(),
+        })
+    } else {
+        None
+    }
 }
 
 #[tauri::command]
@@ -945,7 +983,44 @@ async fn git_get_status(
     let cmd = format!(
         r#"if git -C "{path}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "===IS_REPO==="
-    git -C "{path}" branch --show-current 2>/dev/null || git -C "{path}" rev-parse --abbrev-ref HEAD 2>/dev/null
+    CUR_B=$(git -C "{path}" branch --show-current 2>/dev/null || git -C "{path}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    echo "$CUR_B"
+    echo "===UPSTREAM==="
+    UPSTREAM=$(git -C "{path}" rev-parse --abbrev-ref @{{upstream}} 2>/dev/null || echo "")
+    echo "$UPSTREAM"
+    echo "===AHEAD_BEHIND==="
+    if [ -n "$UPSTREAM" ]; then
+        git -C "{path}" rev-list --left-right --count HEAD...@{{upstream}} 2>/dev/null || echo "0	0"
+    else
+        if [ -n "$CUR_B" ] && git -C "{path}" rev-parse --verify "origin/$CUR_B" >/dev/null 2>&1; then
+            git -C "{path}" rev-list --left-right --count HEAD..."origin/$CUR_B" 2>/dev/null || echo "0	0"
+        else
+            BASE=$(git -C "{path}" merge-base HEAD origin/main 2>/dev/null || git -C "{path}" merge-base HEAD origin/master 2>/dev/null || echo "")
+            if [ -n "$BASE" ]; then
+                CNT=$(git -C "{path}" rev-list --count "$BASE"..HEAD 2>/dev/null || echo 0)
+                echo "$CNT	0"
+            else
+                CNT=$(git -C "{path}" rev-list --count HEAD 2>/dev/null || echo 0)
+                echo "$CNT	0"
+            fi
+        fi
+    fi
+    echo "===OUTGOING==="
+    if [ -n "$UPSTREAM" ]; then
+        git -C "{path}" log @{{upstream}}..HEAD --format="%H%x09%h%x09%s%x09%an%x09%cr" -n 50 2>/dev/null || true
+    elif [ -n "$CUR_B" ] && git -C "{path}" rev-parse --verify "origin/$CUR_B" >/dev/null 2>&1; then
+        git -C "{path}" log origin/"$CUR_B"..HEAD --format="%H%x09%h%x09%s%x09%an%x09%cr" -n 50 2>/dev/null || true
+    elif [ -n "$BASE" ]; then
+        git -C "{path}" log "$BASE"..HEAD --format="%H%x09%h%x09%s%x09%an%x09%cr" -n 50 2>/dev/null || true
+    else
+        git -C "{path}" log -n 50 --format="%H%x09%h%x09%s%x09%an%x09%cr" 2>/dev/null || true
+    fi
+    echo "===INCOMING==="
+    if [ -n "$UPSTREAM" ]; then
+        git -C "{path}" log HEAD..@{{upstream}} --format="%H%x09%h%x09%s%x09%an%x09%cr" -n 20 2>/dev/null || true
+    fi
+    echo "===RECENT==="
+    git -C "{path}" log -n 5 --format="%H%x09%h%x09%s%x09%an%x09%cr" 2>/dev/null || true
     echo "===BRANCHES==="
     git -C "{path}" branch --list --no-color 2>/dev/null
     echo "===STATUS==="
@@ -967,6 +1042,12 @@ fi"#,
                 branches: Vec::new(),
                 changes: Vec::new(),
                 ignored: Vec::new(),
+                upstream: None,
+                ahead: 0,
+                behind: 0,
+                outgoing_commits: Vec::new(),
+                incoming_commits: Vec::new(),
+                recent_commits: Vec::new(),
                 error: Some(e.to_string()),
             });
         }
@@ -979,11 +1060,23 @@ fi"#,
             branches: Vec::new(),
             changes: Vec::new(),
             ignored: Vec::new(),
+            upstream: None,
+            ahead: 0,
+            behind: 0,
+            outgoing_commits: Vec::new(),
+            incoming_commits: Vec::new(),
+            recent_commits: Vec::new(),
             error: None,
         });
     }
 
     let mut current_branch = None;
+    let mut upstream = None;
+    let mut ahead = 0u32;
+    let mut behind = 0u32;
+    let mut outgoing_commits = Vec::new();
+    let mut incoming_commits = Vec::new();
+    let mut recent_commits = Vec::new();
     let mut branches = Vec::new();
     let mut changes = Vec::new();
     let mut ignored = Vec::new();
@@ -993,6 +1086,21 @@ fi"#,
         let trimmed = line.trim();
         if trimmed == "===IS_REPO===" {
             section = "branch";
+            continue;
+        } else if trimmed == "===UPSTREAM===" {
+            section = "upstream";
+            continue;
+        } else if trimmed == "===AHEAD_BEHIND===" {
+            section = "ahead_behind";
+            continue;
+        } else if trimmed == "===OUTGOING===" {
+            section = "outgoing";
+            continue;
+        } else if trimmed == "===INCOMING===" {
+            section = "incoming";
+            continue;
+        } else if trimmed == "===RECENT===" {
+            section = "recent";
             continue;
         } else if trimmed == "===BRANCHES===" {
             section = "branches";
@@ -1009,6 +1117,33 @@ fi"#,
             "branch" => {
                 if !trimmed.is_empty() && current_branch.is_none() {
                     current_branch = Some(trimmed.to_string());
+                }
+            }
+            "upstream" => {
+                if !trimmed.is_empty() && upstream.is_none() {
+                    upstream = Some(trimmed.to_string());
+                }
+            }
+            "ahead_behind" => {
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    ahead = parts[0].parse::<u32>().unwrap_or(0);
+                    behind = parts[1].parse::<u32>().unwrap_or(0);
+                }
+            }
+            "outgoing" => {
+                if let Some(info) = parse_git_commit_line(line) {
+                    outgoing_commits.push(info);
+                }
+            }
+            "incoming" => {
+                if let Some(info) = parse_git_commit_line(line) {
+                    incoming_commits.push(info);
+                }
+            }
+            "recent" => {
+                if let Some(info) = parse_git_commit_line(line) {
+                    recent_commits.push(info);
                 }
             }
             "branches" => {
@@ -1073,12 +1208,26 @@ fi"#,
         }
     }
 
+    // Keep ahead count consistent with outgoing_commits if ahead was 0 but commits exist
+    if ahead == 0 && !outgoing_commits.is_empty() {
+        ahead = outgoing_commits.len() as u32;
+    }
+    if behind == 0 && !incoming_commits.is_empty() {
+        behind = incoming_commits.len() as u32;
+    }
+
     Ok(GitStatusResult {
         is_repo: true,
         current_branch,
         branches,
         changes,
         ignored,
+        upstream,
+        ahead,
+        behind,
+        outgoing_commits,
+        incoming_commits,
+        recent_commits,
         error: None,
     })
 }
@@ -1429,6 +1578,61 @@ async fn git_get_summary_diff(
     Ok(output)
 }
 
+#[tauri::command]
+async fn git_fetch(
+    server_id: String,
+    repo_path: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<String> {
+    let safe_path = repo_path.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
+    let cmd = format!(
+        r#"
+git -C "{path}" fetch --prune 2>&1
+EXIT_CODE=$?
+if [ $EXIT_CODE -ne 0 ]; then
+    echo "===REMORA_GIT_ERR:$EXIT_CODE==="
+fi
+"#,
+        path = safe_path
+    );
+    let output = state
+        .connection
+        .exec_command_with_timeout(&server_id, &cmd, std::time::Duration::from_secs(20))
+        .await?;
+
+    if let Some(pos) = output.find("===REMORA_GIT_ERR:") {
+        let err_detail = output[..pos].trim();
+        return Err(AppError::Internal(if err_detail.is_empty() {
+            "Git fetch 失败".to_string()
+        } else {
+            err_detail.to_string()
+        }));
+    }
+
+    Ok(output)
+}
+
+#[tauri::command]
+async fn git_show_commit(
+    server_id: String,
+    repo_path: String,
+    commit_hash: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<String> {
+    let safe_path = repo_path.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r'], "");
+    let safe_hash = commit_hash.replace(['"', '\'', ';', '&', '|', '`', '$', '\n', '\r', ' '], "");
+    let cmd = format!(
+        r#"git -C "{path}" show --stat -p "{hash}" 2>&1 | head -c 100000"#,
+        path = safe_path,
+        hash = safe_hash
+    );
+    let output = state
+        .connection
+        .exec_command_with_timeout(&server_id, &cmd, std::time::Duration::from_secs(10))
+        .await?;
+    Ok(output)
+}
+
 // --- Server Overview Command ---
 
 #[tauri::command]
@@ -1691,6 +1895,8 @@ pub fn run() {
             git_push,
             git_pull,
             git_sync,
+            git_fetch,
+            git_show_commit,
             git_get_summary_diff,
             gh_get_auth_status,
             gh_switch_account,
@@ -1752,5 +1958,16 @@ github.com
         assert!(status.active_account.is_none());
         assert!(status.accounts.is_empty());
         assert!(status.error.is_some());
+    }
+
+    #[test]
+    fn test_parse_git_commit_line() {
+        let line = "48d6d0327c6109a091d4844338b6ca337bcec965\t48d6d03\tfeat(editor): add mermaid diagram\txzsean666\t2 hours ago";
+        let info = parse_git_commit_line(line).expect("must parse");
+        assert_eq!(info.hash, "48d6d0327c6109a091d4844338b6ca337bcec965");
+        assert_eq!(info.short_hash, "48d6d03");
+        assert_eq!(info.subject, "feat(editor): add mermaid diagram");
+        assert_eq!(info.author, "xzsean666");
+        assert_eq!(info.date_relative, "2 hours ago");
     }
 }

@@ -613,6 +613,12 @@ export async function safeInvoke<T = any>(cmd: string, args?: Record<string, any
     case "git_sync": {
       return "Sync completed successfully." as unknown as T;
     }
+    case "git_fetch": {
+      return "Fetch completed successfully." as unknown as T;
+    }
+    case "git_show_commit": {
+      return `commit ${args?.commitHash || "abc1234"}\nAuthor: Developer <dev@example.com>\nDate:   Sat Sep 19 12:00:00 2026\n\n    sample commit message\n\n--- a/file.txt\n+++ b/file.txt\n@@ -1,3 +1,4 @@\n+ // updated code` as unknown as T;
+    }
     case "git_get_summary_diff": {
       return "===STATUS===\n M src/components/Sidebar/Git/GitPanel.tsx\n===DIFF===\n+ // git panel updated" as unknown as T;
     }
@@ -920,6 +926,18 @@ export async function gitSync(serverId: string, repoPath: string): Promise<strin
 
 export async function gitGetSummaryDiff(serverId: string, repoPath: string): Promise<string> {
   return await safeInvoke<string>("git_get_summary_diff", { serverId, repoPath });
+}
+
+export async function gitFetch(serverId: string, repoPath: string): Promise<string> {
+  return await safeInvoke<string>("git_fetch", { serverId, repoPath });
+}
+
+export async function gitShowCommit(
+  serverId: string,
+  repoPath: string,
+  commitHash: string
+): Promise<string> {
+  return await safeInvoke<string>("git_show_commit", { serverId, repoPath, commitHash });
 }
 
 export interface ServerOverview {

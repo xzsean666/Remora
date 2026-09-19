@@ -9,6 +9,8 @@ import {
   gitPush,
   gitPull,
   gitSync,
+  gitFetch,
+  gitShowCommit,
   gitGetSummaryDiff,
 } from "../utils/tauriBridge";
 import { useFileTreeStore } from "./fileTreeStore";
@@ -26,16 +28,30 @@ export interface GitFileChange {
   raw_status: string;
 }
 
+export interface GitCommitInfo {
+  hash: string;
+  short_hash: string;
+  subject: string;
+  author: string;
+  date_relative: string;
+}
+
 export interface GitStatusResult {
   is_repo: boolean;
   current_branch: string | null;
   branches: string[];
   changes: GitFileChange[];
   ignored: string[];
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  outgoing_commits: GitCommitInfo[];
+  incoming_commits: GitCommitInfo[];
+  recent_commits: GitCommitInfo[];
   error?: string | null;
 }
 
-export type GitOperationType = "commit" | "push" | "pull" | "sync" | "ai" | null;
+export type GitOperationType = "commit" | "push" | "pull" | "sync" | "fetch" | "ai" | null;
 
 interface GitState {
   isRepo: boolean;
@@ -43,11 +59,23 @@ interface GitState {
   branches: string[];
   changes: GitFileChange[];
   ignored: string[];
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  outgoingCommits: GitCommitInfo[];
+  incomingCommits: GitCommitInfo[];
+  recentCommits: GitCommitInfo[];
+  isFetching: boolean;
   loading: boolean;
   error: string | null;
   selectedDiffFile: string | null;
   diffContent: string | null;
   diffLoading: boolean;
+
+  // Selected Commit inspection
+  selectedCommit: GitCommitInfo | null;
+  commitDetail: string | null;
+  commitDetailLoading: boolean;
 
   // GitHub Auth status & accounts
   ghAuth: GhAuthStatus | null;
@@ -64,12 +92,15 @@ interface GitState {
   setCommitLang: (lang: "en" | "zh") => void;
 
   fetchStatus: (serverId?: string, repoPath?: string) => Promise<void>;
+  fetchRemote: (serverId?: string, repoPath?: string) => Promise<void>;
   fetchGhAuth: (serverId?: string) => Promise<void>;
   switchGhAccount: (serverId: string, username: string) => Promise<void>;
   isPathIgnored: (filePath: string, rootPath?: string) => boolean;
   switchBranch: (serverId: string, repoPath: string, branch: string, createNew?: boolean) => Promise<void>;
   fetchDiff: (serverId: string, repoPath: string, filePath: string) => Promise<void>;
   clearDiff: () => void;
+  fetchCommitDetail: (serverId: string, repoPath: string, commit: GitCommitInfo) => Promise<void>;
+  clearCommitDetail: () => void;
 
   // Git operations
   commitChanges: (serverId: string, repoPath: string, stageAll?: boolean) => Promise<void>;
@@ -85,11 +116,22 @@ export const useGitStore = create<GitState>((set, get) => ({
   branches: [],
   changes: [],
   ignored: [],
+  upstream: null,
+  ahead: 0,
+  behind: 0,
+  outgoingCommits: [],
+  incomingCommits: [],
+  recentCommits: [],
+  isFetching: false,
   loading: false,
   error: null,
   selectedDiffFile: null,
   diffContent: null,
   diffLoading: false,
+
+  selectedCommit: null,
+  commitDetail: null,
+  commitDetailLoading: false,
 
   ghAuth: null,
   ghLoading: false,
@@ -132,7 +174,20 @@ export const useGitStore = create<GitState>((set, get) => ({
     const repoPath = overridePath || useFileTreeStore.getState().rootPath;
 
     if (!serverId || !repoPath) {
-      set({ isRepo: false, currentBranch: null, branches: [], changes: [], ignored: [], error: null });
+      set({
+        isRepo: false,
+        currentBranch: null,
+        branches: [],
+        changes: [],
+        ignored: [],
+        upstream: null,
+        ahead: 0,
+        behind: 0,
+        outgoingCommits: [],
+        incomingCommits: [],
+        recentCommits: [],
+        error: null,
+      });
       return;
     }
 
@@ -149,6 +204,12 @@ export const useGitStore = create<GitState>((set, get) => ({
         branches: res.branches,
         changes: res.changes,
         ignored: res.ignored || [],
+        upstream: res.upstream || null,
+        ahead: res.ahead || 0,
+        behind: res.behind || 0,
+        outgoingCommits: res.outgoing_commits || [],
+        incomingCommits: res.incoming_commits || [],
+        recentCommits: res.recent_commits || [],
         error: res.error || null,
         loading: false,
       });
@@ -162,6 +223,26 @@ export const useGitStore = create<GitState>((set, get) => ({
         error: formatErrorMessage(err),
         loading: false,
       });
+    }
+  },
+
+  fetchRemote: async (overrideServerId?: string, overridePath?: string) => {
+    const serverId =
+      overrideServerId ||
+      useConnectionStore.getState().activeServerId ||
+      useFileTreeStore.getState().currentServerId;
+    const repoPath = overridePath || useFileTreeStore.getState().rootPath;
+
+    if (!serverId || !repoPath) return;
+
+    set({ isFetching: true });
+    try {
+      await gitFetch(serverId, repoPath);
+    } catch (err: any) {
+      console.warn("git fetch warning/error:", err);
+    } finally {
+      set({ isFetching: false });
+      await get().fetchStatus(serverId, repoPath);
     }
   },
 
@@ -242,6 +323,23 @@ export const useGitStore = create<GitState>((set, get) => ({
 
   clearDiff: () => {
     set({ selectedDiffFile: null, diffContent: null, diffLoading: false });
+  },
+
+  fetchCommitDetail: async (serverId: string, repoPath: string, commit: GitCommitInfo) => {
+    set({ selectedCommit: commit, commitDetailLoading: true, commitDetail: null });
+    try {
+      const detail = await gitShowCommit(serverId, repoPath, commit.hash);
+      set({ commitDetail: detail, commitDetailLoading: false });
+    } catch (err: any) {
+      set({
+        commitDetail: `获取提交详情失败: ${formatErrorMessage(err)}`,
+        commitDetailLoading: false,
+      });
+    }
+  },
+
+  clearCommitDetail: () => {
+    set({ selectedCommit: null, commitDetail: null, commitDetailLoading: false });
   },
 
   commitChanges: async (serverId: string, repoPath: string, stageAll: boolean = true) => {

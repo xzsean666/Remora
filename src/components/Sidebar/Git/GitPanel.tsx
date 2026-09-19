@@ -8,6 +8,7 @@ import {
   AlertCircle,
   FolderGit2,
   ChevronDown,
+  ChevronRight,
   Terminal,
   Github,
   Check,
@@ -18,8 +19,14 @@ import {
   ArrowUpDown,
   GitCommit,
   Languages,
+  Cloud,
+  History,
+  Copy,
+  Clock,
+  User,
+  RotateCw,
 } from "lucide-react";
-import { useGitStore, GitFileChange } from "../../../stores/gitStore";
+import { useGitStore, GitFileChange, GitCommitInfo } from "../../../stores/gitStore";
 import { useFileTreeStore } from "../../../stores/fileTreeStore";
 import { useConnectionStore } from "../../../stores/connectionStore";
 import { useEditorStore } from "../../../stores/editorStore";
@@ -45,13 +52,26 @@ export const GitPanel: React.FC = () => {
     isOperating,
     operatingAction,
     aiGenerating,
+    upstream,
+    ahead,
+    behind,
+    outgoingCommits,
+    incomingCommits,
+    recentCommits,
+    isFetching,
+    selectedCommit,
+    commitDetail,
+    commitDetailLoading,
     setCommitMessage,
     setCommitLang,
     fetchStatus,
+    fetchRemote,
     fetchGhAuth,
     switchGhAccount,
     fetchDiff,
     clearDiff,
+    fetchCommitDetail,
+    clearCommitDetail,
     commitChanges,
     pushChanges,
     pullChanges,
@@ -69,8 +89,24 @@ export const GitPanel: React.FC = () => {
   const [isGhMenuOpen, setIsGhMenuOpen] = useState(false);
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
 
+  // Accordion open/close states
+  const [isChangesOpen, setIsChangesOpen] = useState(true);
+  const [isOutgoingOpen, setIsOutgoingOpen] = useState(true);
+  const [isIncomingOpen, setIsIncomingOpen] = useState(true);
+  const [isRecentOpen, setIsRecentOpen] = useState(false);
+  const [copiedHash, setCopiedHash] = useState(false);
+
   const ghMenuRef = useRef<HTMLDivElement>(null);
   const effectiveServerId = activeServerId || currentServerId;
+
+  // Auto-expand outgoing when ahead > 0 or incoming when behind > 0
+  useEffect(() => {
+    if (ahead > 0) setIsOutgoingOpen(true);
+  }, [ahead]);
+
+  useEffect(() => {
+    if (behind > 0) setIsIncomingOpen(true);
+  }, [behind]);
 
   // Auto-fetch status on server or rootPath change
   useEffect(() => {
@@ -108,6 +144,20 @@ export const GitPanel: React.FC = () => {
       fetchStatus(effectiveServerId, rootPath);
       fetchGhAuth(effectiveServerId);
     }
+  };
+
+  const handleFetch = async () => {
+    if (!effectiveServerId || !rootPath) return;
+    try {
+      await fetchRemote(effectiveServerId, rootPath);
+      fetchGhAuth(effectiveServerId);
+      setActionSuccessMsg("已获取远端最新分支与提交状态");
+    } catch {}
+  };
+
+  const handleOpenCommit = (commit: GitCommitInfo) => {
+    if (!effectiveServerId || !rootPath) return;
+    fetchCommitDetail(effectiveServerId, rootPath, commit);
   };
 
   const handleOpenFile = (change: GitFileChange) => {
@@ -212,8 +262,17 @@ export const GitPanel: React.FC = () => {
         <div className="flex items-center gap-1">
           <button
             type="button"
+            onClick={handleFetch}
+            disabled={loading || isOperating || isFetching}
+            className="p-1 rounded hover:bg-vscode-hover text-vscode-textMuted hover:text-sky-300 transition-colors cursor-pointer disabled:opacity-50"
+            title="获取远程更新并探测最新提交 (git fetch)"
+          >
+            <RotateCw className={`w-3.5 h-3.5 ${isFetching ? "animate-spin text-sky-400" : ""}`} />
+          </button>
+          <button
+            type="button"
             onClick={handleRefresh}
-            disabled={loading || isOperating}
+            disabled={loading || isOperating || isFetching}
             className="p-1 rounded hover:bg-vscode-hover text-vscode-textMuted hover:text-white transition-colors cursor-pointer disabled:opacity-50"
             title="刷新 Git 与 GitHub 状态"
           >
@@ -270,6 +329,78 @@ export const GitPanel: React.FC = () => {
                     <ChevronDown className="w-3 h-3" />
                   </div>
                 </button>
+              </div>
+
+              {/* Remote Upstream & Sync Status Card */}
+              <div className="px-2 py-1.5 rounded bg-[#19191a] border border-vscode-border/60 text-[11px] space-y-1 shadow-2xs">
+                <div className="flex items-center justify-between gap-1">
+                  <div className="flex items-center gap-1.5 truncate text-vscode-textMuted text-[10px]">
+                    <Cloud className="w-3 h-3 text-sky-400 flex-shrink-0" />
+                    <span className="truncate">
+                      {upstream ? `追踪: ${upstream}` : "未关联远程分支"}
+                    </span>
+                  </div>
+
+                  {ahead === 0 && behind === 0 && upstream ? (
+                    <span className="text-emerald-400 text-[10px] font-medium flex items-center gap-1 flex-shrink-0">
+                      <Check className="w-3 h-3" />
+                      <span>最新</span>
+                    </span>
+                  ) : (
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      {behind > 0 && (
+                        <span
+                          className="px-1.5 py-0.5 rounded-full bg-emerald-950 border border-emerald-700/60 text-emerald-300 text-[10px] font-mono font-bold flex items-center gap-0.5"
+                          title={`${behind} 个远端新提交待拉取`}
+                        >
+                          <ArrowDown className="w-2.5 h-2.5" />
+                          {behind}
+                        </span>
+                      )}
+                      {ahead > 0 && (
+                        <span
+                          className="px-1.5 py-0.5 rounded-full bg-sky-950 border border-sky-700/60 text-sky-300 text-[10px] font-mono font-bold flex items-center gap-0.5"
+                          title={`${ahead} 个本地提交待推送`}
+                        >
+                          <ArrowUp className="w-2.5 h-2.5" />
+                          {ahead}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Status description & fetch trigger */}
+                <div className="text-[10px] text-vscode-textMuted/90 flex items-center justify-between pt-0.5 border-t border-vscode-border/30">
+                  {ahead > 0 && behind > 0 ? (
+                    <span className="text-amber-300 font-medium truncate mr-1">
+                      需同步: {behind}↓ {ahead}↑
+                    </span>
+                  ) : ahead > 0 ? (
+                    <span className="text-sky-300 font-medium truncate mr-1">
+                      {ahead} 个本地提交待推送
+                    </span>
+                  ) : behind > 0 ? (
+                    <span className="text-emerald-300 font-medium truncate mr-1">
+                      {behind} 个远端提交待拉取
+                    </span>
+                  ) : upstream ? (
+                    <span className="text-vscode-textMuted/80 truncate mr-1">与远程完全同步</span>
+                  ) : (
+                    <span className="text-amber-400/80 truncate mr-1">推送将自动设置 upstream</span>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleFetch}
+                    disabled={loading || isOperating || isFetching}
+                    className="text-[10px] text-sky-400 hover:text-sky-300 hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-50 flex-shrink-0"
+                    title="执行 git fetch 探测远程分支是否有新提交"
+                  >
+                    <RefreshCw className={`w-2.5 h-2.5 ${isFetching ? "animate-spin" : ""}`} />
+                    <span>{isFetching ? "获取中" : "检查远端"}</span>
+                  </button>
+                </div>
               </div>
 
               {/* GitHub CLI Account Switcher */}
@@ -352,37 +483,54 @@ export const GitPanel: React.FC = () => {
                 <button
                   type="button"
                   onClick={handlePull}
-                  disabled={loading || isOperating}
-                  className="flex-1 py-1 px-1.5 rounded bg-[#2a2a2b] hover:bg-[#353536] border border-vscode-border/60 hover:border-vscode-border text-vscode-textBright text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
-                  title="拉取远端更新 (git pull)"
+                  disabled={loading || isOperating || isFetching}
+                  className={`flex-1 py-1 px-1.5 rounded border text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-50 ${
+                    behind > 0
+                      ? "bg-emerald-950/40 hover:bg-emerald-900/50 border-emerald-600/70 text-emerald-200"
+                      : "bg-[#2a2a2b] hover:bg-[#353536] border-vscode-border/60 hover:border-vscode-border text-vscode-textBright"
+                  }`}
+                  title={behind > 0 ? `有 ${behind} 个远端提交待拉取 (git pull)` : "拉取远端更新 (git pull)"}
                 >
                   <ArrowDown className={`w-3 h-3 text-emerald-400 ${operatingAction === "pull" ? "animate-bounce" : ""}`} />
-                  <span>Pull</span>
+                  <span>Pull{behind > 0 ? ` (${behind})` : ""}</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={handlePush}
-                  disabled={loading || isOperating}
-                  className="flex-1 py-1 px-1.5 rounded bg-[#2a2a2b] hover:bg-[#353536] border border-vscode-border/60 hover:border-vscode-border text-vscode-textBright text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
-                  title="推送本地提交 (git push)"
+                  disabled={loading || isOperating || isFetching}
+                  className={`flex-1 py-1 px-1.5 rounded border text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-50 ${
+                    ahead > 0
+                      ? "bg-sky-950/40 hover:bg-sky-900/50 border-sky-600/70 text-sky-200"
+                      : "bg-[#2a2a2b] hover:bg-[#353536] border-vscode-border/60 hover:border-vscode-border text-vscode-textBright"
+                  }`}
+                  title={ahead > 0 ? `有 ${ahead} 个本地提交待推送 (git push)` : "推送本地提交 (git push)"}
                 >
                   <ArrowUp className={`w-3 h-3 text-sky-400 ${operatingAction === "push" ? "animate-bounce" : ""}`} />
-                  <span>Push</span>
+                  <span>Push{ahead > 0 ? ` (${ahead})` : ""}</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={handleSync}
-                  disabled={loading || isOperating}
-                  className="flex-1 py-1 px-1.5 rounded bg-[#2a2a2b] hover:bg-[#353536] border border-vscode-border/60 hover:border-vscode-border text-vscode-textBright text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
+                  disabled={loading || isOperating || isFetching}
+                  className={`flex-1 py-1 px-1.5 rounded border text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer disabled:opacity-50 ${
+                    ahead > 0 || behind > 0
+                      ? "bg-amber-950/40 hover:bg-amber-900/50 border-amber-600/70 text-amber-200"
+                      : "bg-[#2a2a2b] hover:bg-[#353536] border-vscode-border/60 hover:border-vscode-border text-vscode-textBright"
+                  }`}
                   title="同步 (先 pull 再 push)"
                 >
                   <ArrowUpDown className={`w-3 h-3 text-amber-400 ${operatingAction === "sync" ? "animate-spin" : ""}`} />
-                  <span>Sync</span>
+                  <span>
+                    {ahead > 0 || behind > 0
+                      ? `Sync (${behind}↓ ${ahead}↑)`
+                      : "Sync"}
+                  </span>
                 </button>
               </div>
             </div>
+
 
             {/* Success Message Banner */}
             {actionSuccessMsg && (
@@ -489,59 +637,295 @@ export const GitPanel: React.FC = () => {
               </button>
             </div>
 
-            {/* Changes Section */}
-            <div className="flex-1 flex flex-col min-h-0">
-              <div className="px-3 py-1.5 bg-vscode-sidebar/95 border-b border-vscode-border/40 flex items-center justify-between text-[11px] font-semibold text-vscode-textBright select-none">
-                <span className="tracking-wide">CHANGES ({changes.length})</span>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-1 space-y-0.5 min-h-0">
-                {changes.length === 0 ? (
-                  <div className="p-6 text-center text-xs text-vscode-textMuted/70 space-y-1">
-                    <p className="font-medium text-emerald-400">✓ No changes</p>
-                    <p className="text-[11px]">Working tree clean</p>
+            {/* Scrollable Sections Area */}
+            <div className="flex-1 overflow-y-auto divide-y divide-vscode-border/30 min-h-0">
+              {/* 1. CHANGES SECTION */}
+              <div className="flex flex-col">
+                <div
+                  onClick={() => setIsChangesOpen(!isChangesOpen)}
+                  className="px-2.5 py-1.5 bg-vscode-sidebar/95 hover:bg-[#252526] flex items-center justify-between text-[11px] font-semibold text-vscode-textBright select-none cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-1">
+                    {isChangesOpen ? (
+                      <ChevronDown className="w-3.5 h-3.5 text-vscode-textMuted" />
+                    ) : (
+                      <ChevronRight className="w-3.5 h-3.5 text-vscode-textMuted" />
+                    )}
+                    <span className="tracking-wide">CHANGES</span>
+                    <span className="text-[10px] text-vscode-textMuted font-mono font-normal">
+                      ({changes.length})
+                    </span>
                   </div>
-                ) : (
-                  changes.map((change) => {
-                    const parts = change.path.split("/");
-                    const fileName = parts.pop() || change.path;
-                    const dirPath = parts.join("/");
+                </div>
 
-                    return (
-                      <div
-                        key={change.path}
-                        onClick={() => handleOpenFile(change)}
-                        className="group w-full px-2 py-1 rounded hover:bg-vscode-hover text-xs flex items-center justify-between transition-colors cursor-pointer font-mono"
-                        title={`${change.path} (${change.status})\n点击在编辑器打开`}
-                      >
-                        <div className="flex items-center gap-2 truncate min-w-0 mr-2">
-                          <FileCode className="w-3.5 h-3.5 text-vscode-textMuted group-hover:text-vscode-textBright flex-shrink-0" />
-                          <span className="truncate text-vscode-textBright font-medium">
-                            {fileName}
-                          </span>
-                          {dirPath && (
-                            <span className="truncate text-[10px] text-vscode-textMuted/70">
-                              {dirPath}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-1.5 flex-shrink-0">
-                          <button
-                            type="button"
-                            onClick={(e) => handleViewDiff(e, change)}
-                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[#333333] text-vscode-textMuted hover:text-white transition-all cursor-pointer"
-                            title="查看代码 Diff"
-                          >
-                            <Eye className="w-3 h-3" />
-                          </button>
-                          {getStatusBadge(change.status)}
-                        </div>
+                {isChangesOpen && (
+                  <div className="p-1 space-y-0.5">
+                    {changes.length === 0 ? (
+                      <div className="py-3 text-center text-xs text-vscode-textMuted/60">
+                        <p className="text-[11px]">Working tree clean (工作区无修改)</p>
                       </div>
-                    );
-                  })
+                    ) : (
+                      changes.map((change) => {
+                        const parts = change.path.split("/");
+                        const fileName = parts.pop() || change.path;
+                        const dirPath = parts.join("/");
+
+                        return (
+                          <div
+                            key={change.path}
+                            onClick={() => handleOpenFile(change)}
+                            className="group w-full px-2 py-1 rounded hover:bg-vscode-hover text-xs flex items-center justify-between transition-colors cursor-pointer font-mono"
+                            title={`${change.path} (${change.status})\n点击在编辑器打开`}
+                          >
+                            <div className="flex items-center gap-2 truncate min-w-0 mr-2">
+                              <FileCode className="w-3.5 h-3.5 text-vscode-textMuted group-hover:text-vscode-textBright flex-shrink-0" />
+                              <span className="truncate text-vscode-textBright font-medium">
+                                {fileName}
+                              </span>
+                              {dirPath && (
+                                <span className="truncate text-[10px] text-vscode-textMuted/70">
+                                  {dirPath}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={(e) => handleViewDiff(e, change)}
+                                className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-[#333333] text-vscode-textMuted hover:text-white transition-all cursor-pointer"
+                                title="查看代码 Diff"
+                              >
+                                <Eye className="w-3 h-3" />
+                              </button>
+                              {getStatusBadge(change.status)}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 )}
               </div>
+
+              {/* 2. COMMITS TO PUSH (OUTGOING COMMITS) */}
+              {(ahead > 0 || outgoingCommits.length > 0) && (
+                <div className="flex flex-col bg-[#141820]/30">
+                  <div
+                    onClick={() => setIsOutgoingOpen(!isOutgoingOpen)}
+                    className="px-2.5 py-1.5 bg-[#171c26]/70 hover:bg-[#1a202c]/90 flex items-center justify-between text-[11px] font-semibold text-sky-200 select-none cursor-pointer transition-colors"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      {isOutgoingOpen ? (
+                        <ChevronDown className="w-3.5 h-3.5 text-sky-400" />
+                      ) : (
+                        <ChevronRight className="w-3.5 h-3.5 text-sky-400" />
+                      )}
+                      <ArrowUp className="w-3 h-3 text-sky-400" />
+                      <span className="tracking-wide">COMMITS TO PUSH</span>
+                      <span className="px-1.5 py-0.2 rounded-full bg-sky-950 text-sky-300 font-mono text-[10px] border border-sky-700/50">
+                        {outgoingCommits.length || ahead}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handlePush();
+                      }}
+                      disabled={isOperating}
+                      className="px-2 py-0.5 rounded bg-sky-600/30 hover:bg-sky-500/50 text-sky-200 hover:text-white text-[10px] font-medium transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      title="立即推送这些提交 (git push)"
+                    >
+                      <ArrowUp className="w-2.5 h-2.5" />
+                      <span>Push</span>
+                    </button>
+                  </div>
+
+                  {isOutgoingOpen && (
+                    <div className="p-1 space-y-1">
+                      {outgoingCommits.length === 0 ? (
+                        <div className="py-2.5 text-center text-[11px] text-sky-300/70">
+                          本地有 {ahead} 个提交尚未推送
+                        </div>
+                      ) : (
+                        outgoingCommits.map((c) => (
+                          <div
+                            key={c.hash}
+                            onClick={() => handleOpenCommit(c)}
+                            className="group w-full px-2 py-1.5 rounded hover:bg-sky-950/30 border border-transparent hover:border-sky-900/40 text-xs flex flex-col gap-0.5 transition-colors cursor-pointer"
+                            title={`${c.hash}\n${c.subject}\n点击查看提交 Diff`}
+                          >
+                            <div className="flex items-center justify-between gap-1.5">
+                              <div className="flex items-center gap-1.5 truncate min-w-0">
+                                <GitCommit className="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />
+                                <span className="px-1 rounded bg-[#1e2430] border border-sky-800/40 text-[10px] font-mono text-sky-300 font-semibold flex-shrink-0">
+                                  {c.short_hash}
+                                </span>
+                                <span className="truncate text-vscode-textBright text-[11px] font-medium group-hover:text-sky-100">
+                                  {c.subject}
+                                </span>
+                              </div>
+                              <Eye className="w-3 h-3 text-vscode-textMuted group-hover:text-sky-300 opacity-0 group-hover:opacity-100 flex-shrink-0 transition-opacity" />
+                            </div>
+                            <div className="flex items-center gap-2 pl-5 text-[10px] text-vscode-textMuted">
+                              {c.author && (
+                                <span className="truncate flex items-center gap-0.5">
+                                  <User className="w-2.5 h-2.5" />
+                                  {c.author}
+                                </span>
+                              )}
+                              {c.date_relative && (
+                                <span className="truncate flex items-center gap-0.5">
+                                  <Clock className="w-2.5 h-2.5" />
+                                  {c.date_relative}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 3. COMMITS TO PULL (INCOMING COMMITS) */}
+              {(behind > 0 || incomingCommits.length > 0) && (
+                <div className="flex flex-col bg-[#142018]/30">
+                  <div
+                    onClick={() => setIsIncomingOpen(!isIncomingOpen)}
+                    className="px-2.5 py-1.5 bg-[#17261d]/70 hover:bg-[#1a2e23]/90 flex items-center justify-between text-[11px] font-semibold text-emerald-200 select-none cursor-pointer transition-colors"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      {isIncomingOpen ? (
+                        <ChevronDown className="w-3.5 h-3.5 text-emerald-400" />
+                      ) : (
+                        <ChevronRight className="w-3.5 h-3.5 text-emerald-400" />
+                      )}
+                      <ArrowDown className="w-3 h-3 text-emerald-400" />
+                      <span className="tracking-wide">COMMITS TO PULL</span>
+                      <span className="px-1.5 py-0.2 rounded-full bg-emerald-950 text-emerald-300 font-mono text-[10px] border border-emerald-700/50">
+                        {incomingCommits.length || behind}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handlePull();
+                      }}
+                      disabled={isOperating}
+                      className="px-2 py-0.5 rounded bg-emerald-600/30 hover:bg-emerald-500/50 text-emerald-200 hover:text-white text-[10px] font-medium transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      title="立即拉取这些提交 (git pull)"
+                    >
+                      <ArrowDown className="w-2.5 h-2.5" />
+                      <span>Pull</span>
+                    </button>
+                  </div>
+
+                  {isIncomingOpen && (
+                    <div className="p-1 space-y-1">
+                      {incomingCommits.length === 0 ? (
+                        <div className="py-2.5 text-center text-[11px] text-emerald-300/70">
+                          远端有 {behind} 个提交等待拉取
+                        </div>
+                      ) : (
+                        incomingCommits.map((c) => (
+                          <div
+                            key={c.hash}
+                            onClick={() => handleOpenCommit(c)}
+                            className="group w-full px-2 py-1.5 rounded hover:bg-emerald-950/30 border border-transparent hover:border-emerald-900/40 text-xs flex flex-col gap-0.5 transition-colors cursor-pointer"
+                            title={`${c.hash}\n${c.subject}\n点击查看提交详情`}
+                          >
+                            <div className="flex items-center justify-between gap-1.5">
+                              <div className="flex items-center gap-1.5 truncate min-w-0">
+                                <GitCommit className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                                <span className="px-1 rounded bg-[#1b261e] border border-emerald-800/40 text-[10px] font-mono text-emerald-300 font-semibold flex-shrink-0">
+                                  {c.short_hash}
+                                </span>
+                                <span className="truncate text-vscode-textBright text-[11px] font-medium group-hover:text-emerald-100">
+                                  {c.subject}
+                                </span>
+                              </div>
+                              <Eye className="w-3 h-3 text-vscode-textMuted group-hover:text-emerald-300 opacity-0 group-hover:opacity-100 flex-shrink-0 transition-opacity" />
+                            </div>
+                            <div className="flex items-center gap-2 pl-5 text-[10px] text-vscode-textMuted">
+                              {c.author && (
+                                <span className="truncate flex items-center gap-0.5">
+                                  <User className="w-2.5 h-2.5" />
+                                  {c.author}
+                                </span>
+                              )}
+                              {c.date_relative && (
+                                <span className="truncate flex items-center gap-0.5">
+                                  <Clock className="w-2.5 h-2.5" />
+                                  {c.date_relative}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 4. RECENT COMMITS SECTION */}
+              {recentCommits.length > 0 && (
+                <div className="flex flex-col">
+                  <div
+                    onClick={() => setIsRecentOpen(!isRecentOpen)}
+                    className="px-2.5 py-1.5 bg-vscode-sidebar hover:bg-[#252526] flex items-center justify-between text-[11px] font-semibold text-vscode-textMuted select-none cursor-pointer transition-colors"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      {isRecentOpen ? (
+                        <ChevronDown className="w-3.5 h-3.5 text-vscode-textMuted" />
+                      ) : (
+                        <ChevronRight className="w-3.5 h-3.5 text-vscode-textMuted" />
+                      )}
+                      <History className="w-3 h-3 text-vscode-textMuted" />
+                      <span className="tracking-wide">RECENT COMMITS</span>
+                      <span className="text-[10px] font-mono font-normal">
+                        ({recentCommits.length})
+                      </span>
+                    </div>
+                  </div>
+
+                  {isRecentOpen && (
+                    <div className="p-1 space-y-1">
+                      {recentCommits.map((c) => (
+                        <div
+                          key={c.hash}
+                          onClick={() => handleOpenCommit(c)}
+                          className="group w-full px-2 py-1 rounded hover:bg-vscode-hover text-xs flex flex-col gap-0.5 transition-colors cursor-pointer"
+                          title={`${c.hash}\n${c.subject}\n点击查看提交 Diff`}
+                        >
+                          <div className="flex items-center justify-between gap-1.5">
+                            <div className="flex items-center gap-1.5 truncate min-w-0">
+                              <GitCommit className="w-3.5 h-3.5 text-vscode-textMuted group-hover:text-vscode-activityBarActive flex-shrink-0" />
+                              <span className="px-1 rounded bg-[#1e1e1e] border border-vscode-border/70 text-[10px] font-mono text-vscode-textMuted group-hover:text-white flex-shrink-0">
+                                {c.short_hash}
+                              </span>
+                              <span className="truncate text-vscode-textBright text-[11px]">
+                                {c.subject}
+                              </span>
+                            </div>
+                            <Eye className="w-3 h-3 text-vscode-textMuted opacity-0 group-hover:opacity-100 flex-shrink-0 transition-opacity" />
+                          </div>
+                          <div className="flex items-center gap-2 pl-5 text-[10px] text-vscode-textMuted/70">
+                            {c.author && <span>{c.author}</span>}
+                            {c.date_relative && <span>• {c.date_relative}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -602,6 +986,124 @@ export const GitPanel: React.FC = () => {
                             ? "bg-red-950/50 text-red-300"
                             : isHeader
                             ? "text-sky-400 font-bold bg-sky-950/20"
+                            : "text-gray-300"
+                        }`}
+                      >
+                        {line || " "}
+                      </div>
+                    );
+                  })}
+                </pre>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Commit Detail Modal */}
+      {selectedCommit && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/75 backdrop-blur-xs select-none"
+          onClick={clearCommitDetail}
+        >
+          <div
+            className="w-full max-w-3xl bg-[#1e1e1e] border border-vscode-border rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="px-4 py-2.5 bg-[#252526] border-b border-vscode-border flex items-center justify-between">
+              <div className="flex items-center gap-2 truncate min-w-0 mr-2">
+                <GitCommit className="w-4 h-4 text-vscode-activityBarActive flex-shrink-0" />
+                <span className="text-xs font-mono font-semibold text-white truncate">
+                  Commit: {selectedCommit.short_hash}
+                </span>
+                <span className="text-xs text-vscode-textMuted truncate hidden sm:inline">
+                  — {selectedCommit.subject}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={clearCommitDetail}
+                className="p-1 rounded hover:bg-vscode-hover text-vscode-textMuted hover:text-white transition-colors cursor-pointer flex-shrink-0"
+                title="关闭 (Esc)"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Commit Metadata Bar */}
+            <div className="px-4 py-2 bg-[#202021] border-b border-vscode-border/60 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 font-mono">
+              <div className="flex items-center gap-2 truncate">
+                <span className="text-vscode-textMuted text-[11px]">Hash:</span>
+                <span className="text-vscode-textBright text-[11px] truncate select-text">
+                  {selectedCommit.hash}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(selectedCommit.hash);
+                    setCopiedHash(true);
+                    setTimeout(() => setCopiedHash(false), 2000);
+                  }}
+                  className="p-0.5 rounded hover:bg-vscode-hover text-vscode-textMuted hover:text-white cursor-pointer"
+                  title="复制完整哈希"
+                >
+                  {copiedHash ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                </button>
+              </div>
+
+              <div className="flex items-center gap-3 text-[11px] text-vscode-textMuted">
+                {selectedCommit.author && (
+                  <span className="flex items-center gap-1">
+                    <User className="w-3 h-3" />
+                    {selectedCommit.author}
+                  </span>
+                )}
+                {selectedCommit.date_relative && (
+                  <span className="flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    {selectedCommit.date_relative}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Commit Message Box */}
+            <div className="px-4 py-2 bg-[#181818] border-b border-vscode-border/40 text-xs font-mono text-vscode-textBright select-text">
+              <div className="font-semibold text-white">{selectedCommit.subject}</div>
+            </div>
+
+            {/* Commit Diff Body */}
+            <div className="p-3 overflow-auto flex-1 font-mono text-xs leading-relaxed bg-[#181818] select-text">
+              {commitDetailLoading ? (
+                <div className="p-8 text-center text-vscode-textMuted flex items-center justify-center gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin text-vscode-activityBarActive" />
+                  <span>Loading commit diff...</span>
+                </div>
+              ) : !commitDetail || commitDetail.trim() === "" ? (
+                <div className="p-8 text-center text-vscode-textMuted">
+                  无文件改动差异
+                </div>
+              ) : (
+                <pre className="whitespace-pre overflow-x-auto text-[11px]">
+                  {commitDetail.split("\n").map((line, idx) => {
+                    const isAdd = line.startsWith("+") && !line.startsWith("+++");
+                    const isDel = line.startsWith("-") && !line.startsWith("---");
+                    const isHeader = line.startsWith("@@");
+                    const isMeta = line.startsWith("commit ") || line.startsWith("Author:") || line.startsWith("Date:");
+
+                    return (
+                      <div
+                        key={idx}
+                        className={`${
+                          isAdd
+                            ? "bg-emerald-950/50 text-emerald-300"
+                            : isDel
+                            ? "bg-red-950/50 text-red-300"
+                            : isHeader
+                            ? "text-sky-400 font-bold bg-sky-950/20"
+                            : isMeta
+                            ? "text-purple-300"
                             : "text-gray-300"
                         }`}
                       >

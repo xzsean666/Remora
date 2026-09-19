@@ -81,20 +81,23 @@
 | **TASK-070** | 远端文件浏览文件夹打包下载与 .gitignore 规则过滤支持 (Remote Folder Archive Download with .gitignore Rule Exclusion) | TASK-004, TASK-007, TASK-010, TASK-047, TASK-057 | **DONE** | `docs/AI/tasks/TASK-070.md` |
 | **TASK-071** | 桌面端文件展示页面开关控制与 Markdown 渲染黑屏崩溃修复 (Desktop File Editor Toggle Control & Markdown Viewer Black Screen Crash Fix) | TASK-006, TASK-008, TASK-067 | **DONE** | `docs/AI/tasks/TASK-071.md` |
 | **TASK-072** | 集成 Mermaid 实现 Markdown 阅读器图表动态渲染 (Integrate Mermaid for Markdown Viewer Diagram Rendering) | TASK-067, TASK-071 | **DONE** | `docs/AI/tasks/TASK-072.md` |
+| **TASK-073** | Source Control 远程状态感知与待推送/待拉取提交可视化管理 (Source Control Remote Sync Status & Ahead/Behind Commits Visualization) | TASK-045, TASK-060, TASK-064 | **DONE** | `docs/AI/tasks/TASK-073.md` |
 
 ---
 
 ## 2. 任务状态统计
 
-- **已完成 (DONE)**: 73
+- **已完成 (DONE)**: 74
 - **进行中 (IN_PROGRESS)**: 0
 - **待处理 (TODO)**: 0
 - **阻塞中 (BLOCKED)**: 0
-- **总任务数**: 73
+- **总任务数**: 74
 
 ---
 
 ## 3. 项目执行总结
+
+- **TASK-073** 圆满完成：Source Control 远程状态感知与待推送/待拉取提交可视化管理 (Source Control Remote Sync Status & Ahead/Behind Commits Visualization)。彻底满足用户在本地 commit 后直观获知待推送提交数量、远端待拉取数量及具体提交记录的刚性诉求：1) **全链路状态模型与极速探测引擎**：在 Rust 后端扩展 `GitStatusResult` 与 `GitCommitInfo` 数据结构，通过单次毫秒级复合 Shell 脚本获取 upstream 追踪分支、ahead（待推送数）、behind（待拉取数）、outgoing_commits（待推送提交摘要列表）、incoming_commits（待拉取提交列表）及 recent_commits（最近提交历史）；兼容已配置 upstream、未配置 upstream 的新分支以及独立仓库；2) **VS Code 风格 Remote Sync 状态卡片**：在分支选择器下方配备高品质微型同步状态条，实时显示追踪的远端分支（如 `origin/main`）、`↑ X 待推送`（天蓝徽章）与 `↓ Y 待拉取`（翡翠绿徽章）或 `✓ 与远程完全同步`；3) **Push / Pull / Sync 动态联动与数字角标**：当有待拉取时 Pull 按钮发光并标注 `Pull (Y)`；当有待推送时 Push 按钮标注 `Push (X)`；Sync 按钮智能指示 `Sync (Y↓ X↑)`，并提供专用的 `Fetch` 探测能力；4) **可折叠提交面板体系 (Accordion Sections)**：新增 **COMMITS TO PUSH**（待推送提交列表，短哈希、标题、作者、相对时间）、**COMMITS TO PULL**（远端待拉取列表）及 **RECENT COMMITS**（最近提交历史）；5) **Commit 差异详情弹窗 (CommitDetailModal)**：点击任意未推送或历史 commit，弹窗展示提交元数据、一键复制完整哈希、及代码 Diff 差异高亮视图；6) 前端 TypeScript 0 报错，`pnpm run build` 成功，42 项 Rust 单元测试与 1 项 E2E 测试全量 100% 通过。
 
 - **TASK-072** 圆满完成：集成 Mermaid 实现 Markdown 阅读器图表动态渲染与卡死根治 (Integrate Mermaid for Markdown Viewer Diagram Rendering & Fix Hang)。彻底满足用户在 Markdown 阅读器中可视化呈现流程图、架构图、时序图等图表的诉求，并彻底根除异步渲染脱节卡死缺陷：1) **Mermaid 官方引擎集成与暗色主题深度适配**：安装 `mermaid@^12.0.0`，在 `MarkdownViewer.tsx` 中单例初始化暗色调色板（背景 `#0d1117`、边框 `#388bfd`、文字 `#f0f6fc`、线条 `#8b949e`），与 VS Code 暗色调完美融合；2) **Marked 代码块拦截与交互容器构建**：自定义 `code` 渲染器拦截 `lang === "mermaid"`，输出包含 `MERMAID DIAGRAM` 徽标、`【查看源码/隐藏源码】` 切换按钮与一键 `Copy` 按钮的工具条；3) **全新架构：缓存驱动直出 (Cache-First Pre-render) 与脱节 DOM 根治**：彻底废除旧版有缺陷的 `querySelectorAll` 查找并修改 DOM 的异步模式，采用全局内存 LRU 缓存 + `mermaidVersion` 响应式版本控制，Marked 直接将已生成的暗色 SVG 注入 HTML 字符串，实现 0ms 秒开直出、0 DOM 查询、React 单次原子提交；4) **AST 异步批量渲染与 4 秒超时熔断保护**：基于词法解析批量提取未缓存 Mermaid 块，使用 `Promise.race` 配合 4 秒超时熔断机制，并在完成后清理 `document.body` 临时节点；语法有误或超时时优雅降级为暗色错误卡片并自动展开源码视图排查，绝不引发页面卡死或白屏；5) **真实 Linux WebKitGTK 2.41 宿主全真模拟测试**：在真实 WebKit 渲染引擎中验证合法图表毫秒级转译出暗色 SVG、错误图表精准捕获与优雅降级；6) 前端 TypeScript 0 报错，`pnpm run build` 生产打包成功，41 项 Rust 单元测试与 1 项 E2E 测试全量 100% 通过。
 
